@@ -1,0 +1,126 @@
+# Enterprise Agent Cloud Configuration
+# For deployment on GCP Cloud Run with Milvus Cloud
+
+benchmark:
+  benchmark:
+    name: nq
+    path: data/chat_sessions/enterprise_agent_cloud.jsonl
+    key_map:
+      q_ls: question
+      gt_ls: golden_answers
+    shuffle: false
+    seed: 42
+    limit: -1
+
+gemini:
+  # API key from environment variable
+  api_key: null  # Will use GOOGLE_API_KEY env var
+  model_name: gemini-3-pro-preview
+  generation_config:
+    temperature: 0.7
+    top_p: 0.8
+    max_output_tokens: 2048
+  system_prompt: 你是一個企業內部智能助理，專門回答關於公司內部文件和流程的問題。請用繁體中文回答。
+
+retriever:
+  # Using OpenAI-compatible embedding via Gemini
+  model_name_or_path: gemini-embedding-001
+  backend_configs:
+    openai:
+      model_name: gemini-embedding-001
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+      api_key: null  # Will use GOOGLE_API_KEY env var
+  batch_size: 16
+  corpus_path: data/corpus_example.jsonl
+  gpu_ids: ''
+  is_multimodal: false
+  backend: openai
+  index_backend: milvus
+  index_backend_configs:
+    milvus:
+      # Milvus Cloud configuration (Zilliz Cloud - us-west-1 Oregon)
+      uri: null  # Will use MILVUS_URI env var (e.g., https://xxx.api.gcp-us-west1.zillizcloud.com)
+      token: null  # Will use MILVUS_TOKEN env var
+      id_field_name: id
+      vector_field_name: vector
+      text_field_name: contents
+      id_max_length: 64
+      text_max_length: 60000
+      metric_type: IP
+      index_params:
+        index_type: AUTOINDEX
+        metric_type: IP
+      search_params:
+        metric_type: IP
+        params: {}
+      index_chunk_size: 1000
+  is_demo: false
+  collection_name: enterprise_docs
+  top_k: 5
+  query_instruction: ''
+
+websearch:
+  api_key: null  # Will use GOOGLE_API_KEY env var
+  search_depth: basic
+  max_results: 5
+
+agent_router:
+  internal_keywords:
+  - SOP
+  - 標準作業程序
+  - 內部
+  - 公司
+  - 企業
+  - 流程
+  - 規定
+  - 規範
+  - 辦法
+  - 守則
+  - 部門
+  - 員工
+  - 人資
+  - HR
+  - 請假
+  - 報銷
+  - 出差
+  - 考勤
+  - 績效
+  - 薪資
+  - 採購
+  - 報價
+  - 合約
+  - 客戶
+  - 供應商
+  - policy
+  - procedure
+  - guideline
+  external_indicators:
+  - 最新
+  - 今天
+  - 昨天
+  - 本週
+  - 新聞
+  - 消息
+  - 報導
+  - 現在
+  - 目前
+  - 最近
+  - 即時
+  - 什麼是
+  - 介紹
+  - 歷史
+  - 全球
+  - 世界
+  - 國際
+  - latest
+  - news
+  - today
+  - current
+  confidence_threshold: 0.5
+
+custom: {}
+
+prompt:
+  enterprise_rag_template: prompt/enterprise_rag.jinja
+  enterprise_web_search_template: prompt/enterprise_web_search.jinja
+  enterprise_hybrid_template: prompt/enterprise_hybrid.jinja

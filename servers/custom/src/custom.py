@@ -1798,5 +1798,297 @@ def surveycpm_format_output(
     return {"ans_ls": ans_ls}
 
 
+# ==================== Enterprise Agent POC Tools ====================
+
+
+@app.tool(output="route_decision->route")
+def check_route_decision(
+    route_decision: Any,
+) -> Dict[str, str]:
+    """Extract route from agent router decision for branching.
+
+    Args:
+        route_decision: Dictionary with route decision info (or nested dict)
+
+    Returns:
+        Dictionary with 'route' string for branch routing
+    """
+    route = "internal"  # default
+
+    app.logger.info(f"check_route_decision received: {type(route_decision)} = {route_decision}")
+
+    if isinstance(route_decision, dict):
+        # Handle nested structure: {"route_decision": {"route": ...}}
+        if "route_decision" in route_decision:
+            inner = route_decision["route_decision"]
+            if isinstance(inner, dict):
+                route = inner.get("route", "internal")
+            else:
+                route = str(inner) if inner else "internal"
+        else:
+            route = route_decision.get("route", "internal")
+    elif isinstance(route_decision, str):
+        route = route_decision
+
+    # Normalize route value
+    valid_routes = ["internal", "external", "hybrid", "internal_then_external"]
+    if route not in valid_routes:
+        app.logger.warning(f"Unknown route '{route}', defaulting to 'internal'")
+        route = "internal"
+
+    app.logger.info(f"Route decision: {route}")
+    return {"route": route}
+
+
+@app.tool(output="route->route")
+def get_route(
+    route: Any,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Extract route for branch routing (greeting/internal/external).
+
+    This function is used by the enterprise agent pipeline to determine
+    which branch to take based on the agent_router classification.
+
+    Router tools must return data in format: [{"data": value, "state": "branch_name"}, ...]
+
+    Args:
+        route: Route value(s) - can be string, list of strings, or list of dicts
+
+    Returns:
+        Dictionary with 'route' containing list of {data, state} dicts for branching
+    """
+    app.logger.info(f"get_route received: {type(route)} = {route}")
+
+    valid_routes = ["greeting", "internal", "external"]
+
+    def normalize_route(r: Any) -> str:
+        """Normalize a single route value."""
+        if isinstance(r, dict):
+            route_val = r.get("route", "internal")
+        elif isinstance(r, str):
+            route_val = r
+        else:
+            route_val = "internal"
+
+        if route_val not in valid_routes:
+            app.logger.warning(f"Unknown route '{route_val}', defaulting to 'internal'")
+            route_val = "internal"
+        return route_val
+
+    # Handle different input formats
+    if isinstance(route, list):
+        # List of routes (batch processing)
+        result = []
+        for r in route:
+            route_str = normalize_route(r)
+            result.append({"data": r, "state": route_str})
+    else:
+        # Single route value
+        route_str = normalize_route(route)
+        result = [{"data": route, "state": route_str}]
+
+    app.logger.info(f"get_route returning: {result}")
+    return {"route": result}
+
+
+@app.tool(output="q_ls->prompt_ls")
+def greeting_prompt(
+    q_ls: List[str],
+) -> Dict[str, List[str]]:
+    """Create simple prompts for greeting responses.
+
+    This function generates prompts for responding to greetings like
+    "Hi", "Hello", "你好" without using RAG retrieval.
+
+    Args:
+        q_ls: List of user queries (greetings)
+
+    Returns:
+        Dictionary with 'prompt_ls' containing greeting response prompts
+    """
+    prompt_ls = []
+
+    for query in q_ls:
+        prompt = f"""使用者說：{query}
+
+請以友善、專業的企業助理身份回應這個問候。
+回應要簡潔自然，可以詢問使用者有什麼可以幫忙的。
+請用繁體中文回答。"""
+        prompt_ls.append(prompt)
+
+    app.logger.info(f"greeting_prompt created {len(prompt_ls)} prompts")
+    return {"prompt_ls": prompt_ls}
+
+
+@app.tool(output="quality_check->route")
+def check_needs_web_search(
+    quality_check: Dict[str, Any],
+) -> Dict[str, str]:
+    """Check if web search fallback is needed based on quality check.
+
+    Args:
+        quality_check: Dictionary with quality assessment
+
+    Returns:
+        Dictionary with 'route' as 'yes' or 'no' for branching
+    """
+    needs_search = False
+
+    if isinstance(quality_check, dict):
+        needs_search = quality_check.get("needs_web_search", False)
+
+    route = "yes" if needs_search else "no"
+    app.logger.info(f"Needs web search: {route}")
+    return {"route": route}
+
+
+@app.tool(output="search_results,q_ls->ret_psg")
+def format_web_search_results(
+    search_results: List[Dict[str, Any]],
+    q_ls: List[str],
+) -> Dict[str, List[List[str]]]:
+    """Format web search results into RAG passage format.
+
+    Args:
+        search_results: List of search result dicts with title, url, content
+        q_ls: List of queries (for determining batch size)
+
+    Returns:
+        Dictionary with 'ret_psg' formatted as list of passage lists
+    """
+    ret_psg = []
+
+    for i in range(len(q_ls)):
+        passages = []
+        results = search_results if i == 0 else []
+
+        for result in results:
+            if isinstance(result, dict):
+                title = result.get("title", "")
+                url = result.get("url", "")
+                content = result.get("content", "")
+                passages.append(f"[{title}]({url})\n{content}")
+
+        ret_psg.append(passages)
+
+    return {"ret_psg": ret_psg}
+
+
+@app.tool(output="rag_answer,search_results->combined_context")
+def combine_rag_and_web_results(
+    rag_answer: List[str],
+    search_results: List[Dict[str, Any]],
+) -> Dict[str, List[str]]:
+    """Combine RAG answer with web search results for hybrid response.
+
+    Args:
+        rag_answer: List of RAG-generated answers
+        search_results: List of web search result dicts
+
+    Returns:
+        Dictionary with 'combined_context' containing merged info
+    """
+    combined = []
+
+    for i, answer in enumerate(rag_answer):
+        parts = [f"內部資料回答：\n{answer}"]
+
+        if search_results:
+            parts.append("\n\n網路搜尋補充資訊：")
+            for j, result in enumerate(search_results[:3], 1):
+                if isinstance(result, dict):
+                    title = result.get("title", "")
+                    content = result.get("content", "")[:500]
+                    parts.append(f"[{j}] {title}: {content}")
+
+        combined.append("\n".join(parts))
+
+    return {"combined_context": combined}
+
+
+@app.tool(output="page_ls->route")
+def check_research_complete(
+    page_ls: List[str],
+) -> Dict[str, str]:
+    """Check if deep research is complete based on page content.
+
+    Args:
+        page_ls: List of research page content
+
+    Returns:
+        Dictionary with 'route' as 'complete' or 'incomplete'
+    """
+    if not page_ls:
+        return {"route": "incomplete"}
+
+    # Check if the last page indicates completion
+    last_page = page_ls[-1] if page_ls else ""
+
+    # Look for completion indicators
+    completion_indicators = [
+        "研究完成", "結論", "總結", "完成",
+        "complete", "conclusion", "summary", "finished",
+        "[COMPLETE]", "[完成]"
+    ]
+
+    is_complete = any(
+        indicator.lower() in last_page.lower()
+        for indicator in completion_indicators
+    )
+
+    route = "complete" if is_complete else "incomplete"
+    app.logger.info(f"Research completion check: {route}")
+    return {"route": route}
+
+
+@app.tool(output="internal_psg,web_psg->psg_ls")
+def merge_internal_and_web_passages(
+    internal_psg: List[List[str]],
+    web_psg: List[Dict[str, Any]],
+) -> Dict[str, List[List[str]]]:
+    """Merge internal document passages with web search results.
+
+    Args:
+        internal_psg: List of internal document passage lists
+        web_psg: Web search results
+
+    Returns:
+        Dictionary with 'psg_ls' containing merged passages
+    """
+    merged = []
+
+    for i, internal in enumerate(internal_psg):
+        passages = list(internal) if internal else []
+
+        # Add web results
+        if web_psg:
+            results = web_psg if isinstance(web_psg, list) else [web_psg]
+            for result in results[:3]:
+                if isinstance(result, dict):
+                    title = result.get("title", "")
+                    url = result.get("url", "")
+                    content = result.get("content", "")
+                    passages.append(f"[網路來源] {title} ({url})\n{content}")
+
+        merged.append(passages)
+
+    return {"psg_ls": merged}
+
+
+@app.tool(output="internal_psg->psg_ls")
+def use_internal_passages_only(
+    internal_psg: List[List[str]],
+) -> Dict[str, List[List[str]]]:
+    """Use only internal document passages (no web search).
+
+    Args:
+        internal_psg: List of internal document passage lists
+
+    Returns:
+        Dictionary with 'psg_ls' containing internal passages only
+    """
+    return {"psg_ls": internal_psg}
+
+
 if __name__ == "__main__":
     app.run(transport="stdio")

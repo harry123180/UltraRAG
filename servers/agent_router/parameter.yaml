@@ -1,0 +1,61 @@
+# servers/agent_router/parameter.yaml
+
+# Agent Router Configuration for Enterprise Agent POC
+
+# Keywords that indicate internal/enterprise queries
+internal_keywords:
+  - "SOP"
+  - "標準作業程序"
+  - "內部"
+  - "公司"
+  - "企業"
+  - "流程"
+  - "規定"
+  - "規範"
+  - "辦法"
+  - "守則"
+  - "部門"
+  - "員工"
+  - "人資"
+  - "HR"
+  - "請假"
+  - "報銷"
+  - "出差"
+  - "考勤"
+  - "績效"
+  - "薪資"
+  - "採購"
+  - "報價"
+  - "合約"
+  - "客戶"
+  - "供應商"
+  - "policy"
+  - "procedure"
+  - "guideline"
+
+# Indicators that suggest external/web search
+external_indicators:
+  - "最新"
+  - "今天"
+  - "昨天"
+  - "本週"
+  - "新聞"
+  - "消息"
+  - "報導"
+  - "現在"
+  - "目前"
+  - "最近"
+  - "即時"
+  - "什麼是"
+  - "介紹"
+  - "歷史"
+  - "全球"
+  - "世界"
+  - "國際"
+  - "latest"
+  - "news"
+  - "today"
+  - "current"
+
+# Confidence threshold for RAG results (0-1)
+confidence_threshold: 0.5

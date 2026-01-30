@@ -44,8 +44,11 @@ class MilvusIndexBackend(BaseIndexBackend):
 
         super().__init__(contents=[], config=config, logger=logger)
 
-        self.uri = str(self._resolve_index_path(self.config.get("uri")))
-        self.token = self.config.get("token")
+        # Support environment variables for cloud deployment
+        self.uri = str(self._resolve_index_path(
+            self.config.get("uri") or os.environ.get("MILVUS_URI")
+        ))
+        self.token = self.config.get("token") or os.environ.get("MILVUS_TOKEN")
         self.collection_name = self.config.get("collection_name")
         self.collection_display_name = self.config.get("collection_display_name")
 

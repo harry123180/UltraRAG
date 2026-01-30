@@ -119,20 +119,27 @@ class Retriever:
 
         if self.is_demo:
             app.logger.info("[retriever] Initializing in DEMO mode.")
-            self.backend = "openai"
+            # Demo mode supports both openai and gemini backends
+            demo_backends = ["openai", "gemini"]
+            if backend.lower() in demo_backends:
+                self.backend = backend.lower()
+            elif "gemini" in self.backend_configs:
+                self.backend = "gemini"
+            elif "openai" in self.backend_configs:
+                self.backend = "openai"
+            else:
+                raise ValidationError(
+                    "is_demo=True requires 'openai' or 'gemini' in backend_configs."
+                )
             self.index_backend_name = "milvus"
 
-            if "openai" not in self.backend_configs:
-                raise ValidationError(
-                    "is_demo=True requires 'openai' in backend_configs."
-                )
             if "milvus" not in self.index_backend_configs:
                 raise ValidationError(
                     "is_demo=True requires 'milvus' in index_backend_configs."
                 )
 
             app.logger.info(
-                "[retriever] Demo mode enforced: Backend=OpenAI, Index=Milvus."
+                f"[retriever] Demo mode enforced: Backend={self.backend}, Index=Milvus."
             )
         else:
             self.backend = backend.lower()
@@ -214,7 +221,11 @@ class Retriever:
 
             model_name = self.cfg.get("model_name")
             base_url = self.cfg.get("base_url")
-            api_key = self.cfg.get("api_key") or os.environ.get("RETRIEVER_API_KEY")
+            api_key = (
+                self.cfg.get("api_key")
+                or os.environ.get("RETRIEVER_API_KEY")
+                or os.environ.get("GOOGLE_API_KEY")  # Cloud deployment fallback
+            )
 
             if not model_name:
                 err_msg = "[openai] model_name is required"
@@ -237,6 +248,38 @@ class Retriever:
                 err_msg = f"[openai] Failed to initialize OpenAI client: {e}"
                 app.logger.error(err_msg)
                 raise RuntimeError(err_msg) from e
+        elif self.backend == "gemini":
+            try:
+                import google.generativeai as genai
+            except ImportError:
+                err_msg = (
+                    "google-generativeai is not installed. "
+                    "Please install it with `pip install google-generativeai`."
+                )
+                app.logger.error(err_msg)
+                raise ImportError(err_msg)
+
+            api_key = (
+                self.cfg.get("api_key")
+                or os.environ.get("GOOGLE_API_KEY")
+            )
+            model_name = self.cfg.get("model_name", "gemini-embedding-001")
+
+            if not api_key:
+                err_msg = "[gemini] GOOGLE_API_KEY is required"
+                app.logger.error(err_msg)
+                raise ValueError(err_msg)
+
+            try:
+                genai.configure(api_key=api_key)
+                self.genai = genai
+                self.model_name = model_name
+                app.logger.info(f"[gemini] Gemini embedding initialized (model='{model_name}')")
+            except Exception as e:
+                err_msg = f"[gemini] Failed to initialize Gemini: {e}"
+                app.logger.error(err_msg)
+                raise RuntimeError(err_msg) from e
+
         elif self.backend == "bm25":
             try:
                 import bm25s
@@ -269,7 +312,7 @@ class Retriever:
         else:
             error_msg = (
                 f"Unsupported backend: {backend}. "
-                "Supported backends: 'infinity', 'sentence_transformers', 'openai'"
+                "Supported backends: 'infinity', 'sentence_transformers', 'openai', 'gemini'"
             )
             app.logger.error(error_msg)
             raise ValueError(error_msg)
@@ -331,7 +374,7 @@ class Retriever:
                 app.logger.warning(f"[retriever] Corpus path not found: {corpus_path}")
 
         self.index_backend: Optional[BaseIndexBackend] = None
-        if self.backend in ["infinity", "sentence_transformers", "openai"]:
+        if self.backend in ["infinity", "sentence_transformers", "openai", "gemini"]:
             index_backend_cfg = self.index_backend_configs.get(
                 self.index_backend_name, {}
             )
@@ -550,6 +593,33 @@ class Retriever:
                     )
                     embeddings.extend([d.embedding for d in resp.data])
                     pbar.update(len(chunk))
+
+        elif self.backend == "gemini":
+            if is_multimodal:
+                err_msg = "gemini backend does not support image embeddings."
+                app.logger.error(err_msg)
+                raise ValueError(err_msg)
+
+            embeddings: list = []
+            with tqdm(
+                total=len(self.contents),
+                desc="[gemini] Embedding:",
+                unit="item",
+            ) as pbar:
+                for start in range(0, len(self.contents), self.batch_size):
+                    chunk = self.contents[start : start + self.batch_size]
+                    # Gemini embed_content supports batch embedding
+                    result = self.genai.embed_content(
+                        model=self.model_name,
+                        content=chunk,
+                        task_type="retrieval_document",
+                    )
+                    if isinstance(result["embedding"][0], list):
+                        embeddings.extend(result["embedding"])
+                    else:
+                        embeddings.append(result["embedding"])
+                    pbar.update(len(chunk))
+
         else:
             err_msg = f"Unsupported backend: {self.backend}"
             app.logger.error(err_msg)
@@ -681,11 +751,21 @@ class Retriever:
 
             for text in tqdm(texts, desc="[Demo] Processing"):
                 try:
-                    resp = await self.model.embeddings.create(
-                        model=self.model_name, input=[text]
-                    )
+                    if self.backend == "gemini":
+                        # Use Gemini native embedding API
+                        result = self.genai.embed_content(
+                            model=self.model_name,
+                            content=[text],
+                            task_type="retrieval_document",
+                        )
+                        vec = result["embedding"][0] if isinstance(result["embedding"][0], list) else result["embedding"]
+                    else:
+                        # Use OpenAI-compatible API
+                        resp = await self.model.embeddings.create(
+                            model=self.model_name, input=[text]
+                        )
+                        vec = resp.data[0].embedding
 
-                    vec = resp.data[0].embedding
                     all_embeddings.append(vec)
 
                     if cached_dim is None:
@@ -861,6 +941,24 @@ class Retriever:
                     model=self.model_name, input=chunk
                 )
                 query_embedding.extend([d.embedding for d in resp.data])
+
+        elif self.backend == "gemini":
+            query_embedding = []
+            for i in tqdm(
+                range(0, len(queries), self.batch_size),
+                desc="[gemini] Embedding:",
+                unit="batch",
+            ):
+                chunk = queries[i : i + self.batch_size]
+                result = self.genai.embed_content(
+                    model=self.model_name,
+                    content=chunk,
+                    task_type="retrieval_query",
+                )
+                if isinstance(result["embedding"][0], list):
+                    query_embedding.extend(result["embedding"])
+                else:
+                    query_embedding.append(result["embedding"])
 
         else:
             error_msg = f"Unsupported backend: {self.backend}"

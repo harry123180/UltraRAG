@@ -1,0 +1,55 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+ENV
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Test
+.pytest_cache
+.coverage
+htmlcov/
+
+# Logs
+*.log
+litellm.log
+
+# Local data (will use cloud storage)
+index/*.index
+index/*.db
+data/chat_sessions/*.jsonl
+
+# Temp files
+*.tmp
+*.temp
+nul
+
+# Docs
+*.md
+!README.md
+
+# Docker
+docker/milvus/
+
+# Dev files
+.env.dev
+CLAUDE.md
+FINAL_GOAL.md

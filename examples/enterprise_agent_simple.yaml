@@ -1,0 +1,25 @@
+# Enterprise Agent Simple Pipeline
+# 簡化版企業內部智能問答系統（無路由，直接使用內部文件）
+
+# MCP Servers
+servers:
+  benchmark: servers/benchmark
+  gemini: servers/gemini
+  retriever: servers/retriever
+  prompt: servers/prompt
+
+# MCP Client Pipeline
+pipeline:
+# 1. 載入使用者問題
+- benchmark.get_data
+
+# 2. 初始化各模組
+- gemini.gemini_init
+- retriever.retriever_init
+
+# 3. 進行內部文件檢索
+- retriever.retriever_search
+
+# 4. 產生提示詞並生成回答
+- prompt.enterprise_rag_prompt
+- gemini.generate

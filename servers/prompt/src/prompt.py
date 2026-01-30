@@ -1013,5 +1013,168 @@ def surveycpm_extend_plan(
     return ret
 
 
+# ==================== Enterprise Agent Prompts ====================
+
+
+@app.prompt(output="q_ls,ret_psg,enterprise_rag_template->prompt_ls")
+def enterprise_rag_prompt(
+    q_ls: List[str],
+    ret_psg: List[Union[str, Any]],
+    template: Union[str, Path],
+) -> List[PromptMessage]:
+    """Generate prompts for enterprise RAG Q&A.
+
+    Args:
+        q_ls: List of questions
+        ret_psg: List of retrieved passages (one per question)
+        template: Path to Jinja2 template file (enterprise_rag.jinja)
+
+    Returns:
+        List of PromptMessage objects
+    """
+    template: Template = load_prompt_template(template)
+    ret = []
+    for q, psg in zip(q_ls, ret_psg):
+        # Handle various passage formats
+        if isinstance(psg, list):
+            # Convert all elements to strings before joining
+            passage_text = "\n\n---\n\n".join(str(p) for p in psg)
+        elif isinstance(psg, dict):
+            # Handle dict format
+            passage_text = psg.get("contents", "") or psg.get("content", "") or str(psg)
+        else:
+            passage_text = str(psg) if psg else ""
+        p = template.render(question=q, documents=passage_text)
+        ret.append(p)
+    return ret
+
+
+@app.prompt(output="q_ls,web_results,enterprise_web_search_template->prompt_ls")
+def enterprise_web_search_prompt(
+    q_ls: List[str],
+    web_results: List[Union[str, Any]],
+    template: Union[str, Path],
+) -> List[PromptMessage]:
+    """Generate prompts for enterprise web search results.
+
+    Args:
+        q_ls: List of questions
+        web_results: List of web search results (one per question)
+        template: Path to Jinja2 template file (enterprise_web_search.jinja)
+
+    Returns:
+        List of PromptMessage objects
+    """
+    template: Template = load_prompt_template(template)
+    ret = []
+    for q, results in zip(q_ls, web_results):
+        # Format web results
+        if isinstance(results, list):
+            formatted_results = []
+            for i, r in enumerate(results, 1):
+                if isinstance(r, dict):
+                    title = r.get("title", "")
+                    content = r.get("content", r.get("snippet", ""))
+                    url = r.get("url", "")
+                    formatted_results.append(f"[{i}] {title}\n{content}\n來源: {url}")
+                elif isinstance(r, str):
+                    formatted_results.append(f"[{i}] {r}")
+                else:
+                    formatted_results.append(f"[{i}] {str(r)}")
+            results_text = "\n\n".join(formatted_results) if formatted_results else "無搜尋結果"
+        elif isinstance(results, dict):
+            title = results.get("title", "")
+            content = results.get("content", "")
+            results_text = f"{title}\n{content}" if title or content else str(results)
+        else:
+            results_text = str(results) if results else "無搜尋結果"
+        p = template.render(question=q, web_results=results_text)
+        ret.append(p)
+    return ret
+
+
+@app.prompt(output="q_ls,ret_psg,web_results,enterprise_hybrid_template->prompt_ls")
+def enterprise_hybrid_prompt(
+    q_ls: List[str],
+    ret_psg: List[Union[str, Any]],
+    web_results: List[Union[str, Any]],
+    template: Union[str, Path],
+) -> List[PromptMessage]:
+    """Generate prompts for enterprise hybrid mode (RAG + web search).
+
+    Args:
+        q_ls: List of questions
+        ret_psg: List of retrieved passages (one per question)
+        web_results: List of web search results (one per question)
+        template: Path to Jinja2 template file (enterprise_hybrid.jinja)
+
+    Returns:
+        List of PromptMessage objects
+    """
+    template: Template = load_prompt_template(template)
+    ret = []
+    for q, psg, results in zip(q_ls, ret_psg, web_results):
+        # Format internal documents
+        if isinstance(psg, list):
+            internal_text = "\n\n---\n\n".join(str(p) for p in psg)
+        elif isinstance(psg, dict):
+            internal_text = psg.get("contents", "") or psg.get("content", "") or str(psg)
+        else:
+            internal_text = str(psg) if psg else ""
+
+        # Format web results
+        if isinstance(results, list):
+            formatted_results = []
+            for i, r in enumerate(results, 1):
+                if isinstance(r, dict):
+                    title = r.get("title", "")
+                    content = r.get("content", r.get("snippet", ""))
+                    url = r.get("url", "")
+                    formatted_results.append(f"[{i}] {title}\n{content}\n來源: {url}")
+                elif isinstance(r, str):
+                    formatted_results.append(f"[{i}] {r}")
+                else:
+                    formatted_results.append(f"[{i}] {str(r)}")
+            external_text = "\n\n".join(formatted_results) if formatted_results else ""
+        elif isinstance(results, dict):
+            title = results.get("title", "")
+            content = results.get("content", "")
+            external_text = f"{title}\n{content}" if title or content else str(results)
+        else:
+            external_text = str(results) if results else ""
+
+        p = template.render(
+            question=q,
+            internal_documents=internal_text,
+            external_results=external_text
+        )
+        ret.append(p)
+    return ret
+
+
+@app.prompt(output="q_ls,route_decision,enterprise_route_template->prompt_ls")
+def enterprise_route_decision_prompt(
+    q_ls: List[str],
+    route_decision: List[str],
+    template: Union[str, Path],
+) -> List[PromptMessage]:
+    """Generate prompts for explaining route decisions.
+
+    Args:
+        q_ls: List of questions
+        route_decision: List of route decisions ("internal", "external", "hybrid")
+        template: Path to Jinja2 template file
+
+    Returns:
+        List of PromptMessage objects
+    """
+    template: Template = load_prompt_template(template)
+    ret = []
+    for q, decision in zip(q_ls, route_decision):
+        p = template.render(question=q, route=decision)
+        ret.append(p)
+    return ret
+
+
 if __name__ == "__main__":
     app.run(transport="stdio")

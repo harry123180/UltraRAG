@@ -1,0 +1,10 @@
+# servers/gemini/parameter.yaml
+
+# Gemini API Configuration
+api_key: null  # Set GOOGLE_API_KEY env var or provide here
+model_name: gemini-3-pro-preview
+
+generation_config:
+  temperature: 0.7
+  top_p: 0.8
+  max_output_tokens: 2048

@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import secrets
+
 from flask import (
     Flask,
     Response,
@@ -20,6 +22,7 @@ from flask import (
 )
 
 from . import pipeline_manager as pm
+from .auth_routes import auth_bp
 
 LOGGER = logging.getLogger(__name__)
 
@@ -105,6 +108,10 @@ def create_app(admin_mode: bool = False) -> Flask:
     """
     app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
     app.config["ADMIN_MODE"] = admin_mode
+    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+
+    # Register authentication blueprint
+    app.register_blueprint(auth_bp)
 
     @app.errorhandler(pm.PipelineManagerError)
     def handle_pipeline_error(
@@ -134,6 +141,41 @@ def create_app(admin_mode: bool = False) -> Flask:
         LOGGER.error(f"System error: {err}", exc_info=True)
         return jsonify({"error": "Internal Server Error", "details": str(err)}), 500
 
+    @app.route("/api/health")
+    def health_check():
+        """Health check endpoint for Cloud Run."""
+        return jsonify({"status": "healthy", "service": "ultrarag"}), 200
+
+    @app.route("/api/debug/files")
+    def debug_files():
+        """Debug endpoint to check file structure in container."""
+        project_root = Path(__file__).resolve().parents[2]
+        examples_dir = project_root / "examples"
+        param_dir = examples_dir / "parameter"
+
+        result = {
+            "project_root": str(project_root),
+            "examples_dir": str(examples_dir),
+            "examples_exists": examples_dir.exists(),
+            "parameter_dir": str(param_dir),
+            "parameter_exists": param_dir.exists(),
+            "parameter_files": [],
+            "pipeline_files": [],
+            "env_vars": {
+                "GOOGLE_API_KEY": "set" if os.environ.get("GOOGLE_API_KEY") else "not set",
+                "MILVUS_URI": os.environ.get("MILVUS_URI", "not set"),
+                "MILVUS_TOKEN": "set" if os.environ.get("MILVUS_TOKEN") else "not set",
+            }
+        }
+
+        if param_dir.exists():
+            result["parameter_files"] = [f.name for f in param_dir.glob("*.yaml")]
+
+        if examples_dir.exists():
+            result["pipeline_files"] = [f.name for f in examples_dir.glob("*.yaml")]
+
+        return jsonify(result), 200
+
     @app.route("/favicon.svg")
     def favicon():
         return send_from_directory(
@@ -155,6 +197,16 @@ def create_app(admin_mode: bool = False) -> Flask:
     @app.route("/settings")
     def settings_page() -> Response:
         """Serve frontend settings page."""
+        return send_from_directory(app.static_folder, "index.html")
+
+    @app.route("/login")
+    def login_page() -> Response:
+        """Serve frontend login page."""
+        return send_from_directory(app.static_folder, "index.html")
+
+    @app.route("/admin")
+    def admin_page() -> Response:
+        """Serve frontend admin page."""
         return send_from_directory(app.static_folder, "index.html")
 
     @app.route("/config")
@@ -375,11 +427,30 @@ def create_app(admin_mode: bool = False) -> Flask:
                 "index_backend_configs": {"milvus": milvus_global_config},
             }
 
+            # Cloud deployment: use Gemini embedding if GOOGLE_API_KEY is set
+            if os.environ.get("GOOGLE_API_KEY"):
+                retriever_params["backend"] = "gemini"
+                retriever_params["backend_configs"] = {
+                    "gemini": {
+                        "api_key": os.environ.get("GOOGLE_API_KEY"),
+                        "model_name": "gemini-embedding-001",
+                    }
+                }
+                retriever_params["is_demo"] = True  # Enable demo mode for Milvus
+                LOGGER.info("Chat using Gemini embedding backend (cloud mode)")
+
             if selected_collection:
                 retriever_params["collection_name"] = selected_collection
                 LOGGER.debug(f"Chat using collection override: {selected_collection}")
 
             dynamic_params["retriever"] = retriever_params
+
+            # Also configure Gemini generation for cloud
+            if os.environ.get("GOOGLE_API_KEY"):
+                dynamic_params["gemini"] = {
+                    "api_key": os.environ.get("GOOGLE_API_KEY"),
+                    "model_name": "gemini-3-pro-preview",  # Use valid model name
+                }
 
             if "collection_name" in dynamic_params:
                 del dynamic_params["collection_name"]
@@ -422,7 +493,7 @@ def create_app(admin_mode: bool = False) -> Flask:
             )
             return Response(
                 pm.chat_multiturn_stream(
-                    session_id, question, dynamic_params, conversation_history
+                    session_id, question, dynamic_params, conversation_history, name
                 ),
                 mimetype="text/event-stream",
             )
@@ -719,10 +790,107 @@ def create_app(admin_mode: bool = False) -> Flask:
             return jsonify({"error": "No selected files"}), 400
 
         try:
+            LOGGER.info(f"Uploading {len(files)} file(s): {[f.filename for f in files]}")
             result = pm.upload_kb_files_batch(files)
+            LOGGER.info(f"Upload result: {result}")
+            if "error" in result:
+                return jsonify(result), 400
             return jsonify(result)
         except Exception as e:
-            LOGGER.error(f"Upload failed: {e}")
+            import traceback
+            LOGGER.error(f"Upload failed: {e}\n{traceback.format_exc()}")
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/chat/parse-file", methods=["POST"])
+    def parse_chat_file() -> Response:
+        """Parse uploaded file for chat context.
+
+        Extracts text content from PDF, DOC, DOCX, TXT, MD files.
+
+        Returns:
+            JSON response with extracted content
+        """
+        if "file" not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+
+        file = request.files["file"]
+        if not file.filename:
+            return jsonify({"error": "No file selected"}), 400
+
+        filename = file.filename.lower()
+        max_size = 10 * 1024 * 1024  # 10MB
+
+        # Read file content
+        file_content = file.read()
+        if len(file_content) > max_size:
+            return jsonify({"error": f"File too large (max {max_size // 1024 // 1024}MB)"}), 400
+
+        try:
+            content = ""
+
+            if filename.endswith(".pdf"):
+                # Parse PDF
+                try:
+                    import io
+                    try:
+                        import fitz  # PyMuPDF
+                        pdf_doc = fitz.open(stream=file_content, filetype="pdf")
+                        text_parts = []
+                        for page_num in range(len(pdf_doc)):
+                            page = pdf_doc[page_num]
+                            text_parts.append(f"[Page {page_num + 1}]\n{page.get_text()}")
+                        content = "\n\n".join(text_parts)
+                        pdf_doc.close()
+                    except ImportError:
+                        # Fallback to pdfplumber
+                        import pdfplumber
+                        with pdfplumber.open(io.BytesIO(file_content)) as pdf:
+                            text_parts = []
+                            for i, page in enumerate(pdf.pages):
+                                text = page.extract_text() or ""
+                                text_parts.append(f"[Page {i + 1}]\n{text}")
+                            content = "\n\n".join(text_parts)
+                except Exception as e:
+                    LOGGER.error(f"PDF parsing error: {e}")
+                    return jsonify({"error": f"Failed to parse PDF: {e}"}), 400
+
+            elif filename.endswith((".doc", ".docx")):
+                # Parse Word document
+                try:
+                    import io
+                    from docx import Document
+                    doc = Document(io.BytesIO(file_content))
+                    paragraphs = [para.text for para in doc.paragraphs if para.text.strip()]
+                    content = "\n\n".join(paragraphs)
+                except ImportError:
+                    return jsonify({"error": "python-docx not installed for Word file support"}), 400
+                except Exception as e:
+                    LOGGER.error(f"DOC parsing error: {e}")
+                    return jsonify({"error": f"Failed to parse Word document: {e}"}), 400
+
+            elif filename.endswith((".txt", ".md")):
+                # Plain text or Markdown
+                try:
+                    content = file_content.decode("utf-8")
+                except UnicodeDecodeError:
+                    try:
+                        content = file_content.decode("big5")
+                    except:
+                        content = file_content.decode("utf-8", errors="ignore")
+
+            else:
+                return jsonify({"error": f"Unsupported file type: {filename}"}), 400
+
+            # Truncate if too long (max ~50k chars for context)
+            max_chars = 50000
+            if len(content) > max_chars:
+                content = content[:max_chars] + f"\n\n... [內容已截斷，原始長度: {len(content)} 字元]"
+
+            LOGGER.info(f"Parsed chat file: {file.filename}, content length: {len(content)}")
+            return jsonify({"content": content, "filename": file.filename, "length": len(content)})
+
+        except Exception as e:
+            LOGGER.error(f"File parsing error: {e}")
             return jsonify({"error": str(e)}), 500
 
     @app.route("/api/kb/files/<string:category>/<string:filename>", methods=["DELETE"])
@@ -1429,7 +1597,9 @@ def parse_ai_actions(content: str, context: Dict) -> list:
     return deduplicate_ai_actions(actions)
 
 
+# Create app instance for gunicorn (production)
+app = create_app()
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    app = create_app()
     app.run(host="0.0.0.0", port=5050, debug=True)

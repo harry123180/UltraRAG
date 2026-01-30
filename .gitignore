@@ -23,10 +23,38 @@ data/chat_sessions/
 data/knowledge_base/
 # Environment variables and secrets
 .env
+litellm_config.yaml
+zilliz-cloud-*.txt
+.env.cloudrun
 
-# Example configuration files
-examples/parameter/*.yaml
-examples/server/*.yaml
+# User data and sessions (sensitive)
+data/sessions.json
+data/users.json
+
+# Log files
+*.log
+litellm.log
+
+# Windows temp files
+nul
+
+# Example configuration files (user-specific)
+# Keep cloud-ready defaults, ignore user-specific ones
+examples/parameter/*_local.yaml
+examples/server/*_local.yaml
+
+# Keep default parameter files for cloud deployment
+!examples/parameter/build_text_corpus_parameter.yaml
+!examples/parameter/corpus_chunk_parameter.yaml
+!examples/parameter/milvus_index_parameter.yaml
+!examples/parameter/enterprise_agent_parameter.yaml
+
+# Keep default server files for cloud deployment
+!examples/server/build_text_corpus_server.yaml
+!examples/server/corpus_chunk_server.yaml
+!examples/server/milvus_index_server.yaml
+!examples/server/enterprise_agent_server.yaml
+!examples/server/sayhello_server.yaml
 
 # Server configuration files for each server module
 servers/*/server.yaml

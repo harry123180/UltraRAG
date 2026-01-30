@@ -5,7 +5,7 @@ corpus_path: data/corpus_example.jsonl
 embedding_path: embedding/embedding.npy
 collection_name: wiki
 
-backend: sentence_transformers # options: infinity, sentence_transformers, openai, bm25
+backend: openai # options: infinity, sentence_transformers, openai, bm25
 backend_configs:
   infinity:
     bettertransformer: false
@@ -23,8 +23,8 @@ backend_configs:
       q_task: null
   openai:
     model_name: text-embedding-3-small
-    base_url: "https://api.openai.com/v1"
-    api_key: "abc"
+    base_url: "http://localhost:4000"
+    api_key: "sk-fake-key"
   bm25:
     lang: en
     save_path: index/bm25

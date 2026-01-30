@@ -865,7 +865,10 @@ async def build(config_path: str) -> None:
         NodeNotInstalledError: If Node.js is required but not installed
         NodeVersionTooLowError: If Node.js version is too low
     """
-    global node_status
+    global node_status, logger
+    # Initialize logger if not set (when called from UI backend)
+    if logger is None:
+        logger = get_logger("Client", os.environ.get("log_level", "info"))
     logger.info(f"Building configuration {config_path}")
     cfg_path = Path(config_path)
     pipline_name = cfg_path.stem
@@ -1104,7 +1107,10 @@ def load_pipeline_context(
     Raises:
         FileNotFoundError: If parameter file doesn't exist
     """
-    global node_status
+    global node_status, logger
+    # Initialize logger if not set (when called from UI backend)
+    if logger is None:
+        logger = get_logger("Client", os.environ.get("log_level", "info"))
     cfg_path = Path(config_path)
     logger.info(f"Executing pipeline with configuration {config_path}")
     cfg = Configuration()
@@ -1206,6 +1212,9 @@ def create_mcp_client(mcp_cfg: Dict[str, Any]) -> Client:
     Returns:
         Initialized MCP Client instance
     """
+    global logger
+    if logger is None:
+        logger = get_logger("Client", os.environ.get("log_level", "info"))
     logger.info("Initializing MCP Client...")
     return Client(mcp_cfg)
 
@@ -1290,6 +1299,10 @@ async def execute_pipeline(
     Returns:
         Pipeline execution results
     """
+    import time as time_module
+    pipeline_start_time = time_module.perf_counter()
+    step_timings = []  # Track all step timings
+
     # Create independent loop termination flag list for current coroutine
     # Use ContextVar to ensure no interference between concurrent users
     _loop_terminal_var.set([])
@@ -1356,6 +1369,7 @@ async def execute_pipeline(
         indent = "  " * depth
         result = None
         for idx, step in enumerate(steps):
+            step_start_time = time_module.perf_counter()
             logger.info(f"{indent}Executing step: {step}")
 
             if isinstance(step, str):
@@ -1368,8 +1382,14 @@ async def execute_pipeline(
             is_final_step = depth == 0 and idx == len(steps) - 1
 
             if stream_callback:
+                elapsed_since_start = (time_module.perf_counter() - pipeline_start_time) * 1000
                 await stream_callback(
-                    {"type": "step_start", "name": current_step_name, "depth": depth}
+                    {
+                        "type": "step_start",
+                        "name": current_step_name,
+                        "depth": depth,
+                        "elapsed_ms": round(elapsed_since_start, 1),
+                    }
                 )
 
             if isinstance(step, dict) and "loop" in step:
@@ -1502,12 +1522,17 @@ async def execute_pipeline(
                         result = mock_result_obj
 
                         if stream_callback:
+                            step_duration = (time_module.perf_counter() - step_start_time) * 1000
+                            elapsed_total = (time_module.perf_counter() - pipeline_start_time) * 1000
+                            step_timings.append({"step": current_step_name, "duration_ms": round(step_duration, 1)})
                             summary = _summarize_step_result(tool_name, mock_result_obj)
                             await stream_callback(
                                 {
                                     "type": "step_end",
                                     "name": current_step_name,
                                     "output": summary,
+                                    "duration_ms": round(step_duration, 1),
+                                    "elapsed_ms": round(elapsed_total, 1),
                                 }
                             )
 
@@ -1603,12 +1628,17 @@ async def execute_pipeline(
                             logger.warning(f"Failed to extract sources: {e}")
 
                     if stream_callback:
+                        step_duration = (time_module.perf_counter() - step_start_time) * 1000
+                        elapsed_total = (time_module.perf_counter() - pipeline_start_time) * 1000
+                        step_timings.append({"step": current_step_name, "duration_ms": round(step_duration, 1)})
                         summary = _summarize_step_result(current_step_name, result)
                         await stream_callback(
                             {
                                 "type": "step_end",
                                 "name": current_step_name,
                                 "output": summary,
+                                "duration_ms": round(step_duration, 1),
+                                "elapsed_ms": round(elapsed_total, 1),
                             }
                         )
 
@@ -1675,12 +1705,17 @@ async def execute_pipeline(
                         result = mock_result_obj
 
                         if stream_callback:
+                            step_duration = (time_module.perf_counter() - step_start_time) * 1000
+                            elapsed_total = (time_module.perf_counter() - pipeline_start_time) * 1000
+                            step_timings.append({"step": current_step_name, "duration_ms": round(step_duration, 1)})
                             summary = _summarize_step_result(tool_name, mock_result_obj)
                             await stream_callback(
                                 {
                                     "type": "step_end",
                                     "name": current_step_name,
                                     "output": summary,
+                                    "duration_ms": round(step_duration, 1),
+                                    "elapsed_ms": round(elapsed_total, 1),
                                 }
                             )
 
@@ -1767,12 +1802,17 @@ async def execute_pipeline(
                             logger.warning(f"Failed to extract sources: {e}")
 
                     if stream_callback:
+                        step_duration = (time_module.perf_counter() - step_start_time) * 1000
+                        elapsed_total = (time_module.perf_counter() - pipeline_start_time) * 1000
+                        step_timings.append({"step": current_step_name, "duration_ms": round(step_duration, 1)})
                         summary = _summarize_step_result(current_step_name, result)
                         await stream_callback(
                             {
                                 "type": "step_end",
                                 "name": current_step_name,
                                 "output": summary,
+                                "duration_ms": round(step_duration, 1),
+                                "elapsed_ms": round(elapsed_total, 1),
                             }
                         )
 
@@ -1797,7 +1837,18 @@ async def execute_pipeline(
     result = None
     try:
         result = await _execute_steps(pipeline_cfg)
-        logger.info("Pipeline execution completed.")
+        total_duration = (time_module.perf_counter() - pipeline_start_time) * 1000
+        logger.info(f"Pipeline execution completed in {total_duration:.1f}ms")
+
+        # Send timing summary
+        if stream_callback:
+            await stream_callback(
+                {
+                    "type": "timing",
+                    "total_ms": round(total_duration, 1),
+                    "steps": step_timings,
+                }
+            )
     finally:
         for tool_name in cleanup_tools:
             try:

@@ -1,0 +1,13 @@
+# Simple Cloud Build configuration
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/ultrarag:latest'
+      - '-f'
+      - 'docker/cloudrun/Dockerfile'
+      - '.'
+
+images:
+  - 'gcr.io/$PROJECT_ID/ultrarag:latest'

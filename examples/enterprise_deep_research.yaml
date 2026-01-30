@@ -1,0 +1,102 @@
+# Enterprise Deep Research Pipeline
+# 企業內部深度研究系統 - 多輪迭代搜尋與報告生成
+
+# MCP Servers
+servers:
+  benchmark: servers/benchmark
+  gemini: servers/gemini
+  retriever: servers/retriever
+  websearch: servers/websearch
+  agent_router: servers/agent_router
+  prompt: servers/prompt
+  custom: servers/custom
+
+# MCP Client Pipeline
+pipeline:
+# 1. 載入使用者問題
+- benchmark.get_data
+
+# 2. 初始化各模組
+- gemini.gemini_init
+- retriever.retriever_init
+- websearch.websearch_init
+- agent_router.router_init
+- custom.init_citation_registry
+
+# 3. 生成研究計劃
+- prompt.deep_research_plan
+- gemini.generate:
+    output:
+      ans_ls: plan_ls
+
+# 4. 初始化研究頁面
+- prompt.deep_research_init_page
+- gemini.generate:
+    output:
+      ans_ls: page_ls
+
+# 5. 多輪迭代研究 (最多10輪)
+- loop:
+    times: 10
+    steps:
+    - branch:
+        router:
+        - custom.check_research_complete
+        branches:
+          incomplete:
+          # 生成子查詢
+          - prompt.deep_research_gen_subq
+          - gemini.generate:
+              output:
+                ans_ls: subq_ls
+
+          # 內部文件搜尋
+          - retriever.retriever_search:
+              input:
+                query_list: subq_ls
+              output:
+                ret_psg: internal_psg
+
+          # 路由判斷是否需要外部搜尋
+          - agent_router.classify_query
+          - branch:
+              router:
+              - custom.check_route_decision
+              branches:
+                external:
+                - websearch.search:
+                    input:
+                      query: subq_ls
+                    output:
+                      search_results: web_psg
+                - custom.merge_internal_and_web_passages
+                internal:
+                - custom.use_internal_passages_only
+                hybrid:
+                - websearch.search:
+                    input:
+                      query: subq_ls
+                    output:
+                      search_results: web_psg
+                - custom.merge_internal_and_web_passages
+                internal_then_external:
+                - custom.use_internal_passages_only
+
+          # 添加引用編號
+          - custom.assign_citation_ids_stateful:
+              input:
+                ret_psg: psg_ls
+              output:
+                ret_psg: psg_ls
+
+          # 填充研究頁面
+          - prompt.deep_research_fill_page
+          - gemini.generate:
+              output:
+                ans_ls: page_ls
+
+          complete: []
+
+# 6. 生成最終研究報告
+- prompt.deep_research_final_report
+- gemini.generate

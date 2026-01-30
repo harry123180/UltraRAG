@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <title>UltraRAG</title>
+  <title>企業 Agent POC</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- Local fonts and vendor CSS for offline use -->
   <link rel="stylesheet" href="vendor/css/fonts.css" />
@@ -16,21 +16,71 @@
 </head>
 
 <body>
+  <!-- Login Modal -->
+  <div class="modal fade" id="login-modal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header border-0">
+          <h5 class="modal-title">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="me-2">
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+              <polyline points="10 17 15 12 10 7"></polyline>
+              <line x1="15" y1="12" x2="3" y2="12"></line>
+            </svg>
+            企業 Agent POC - 登入
+          </h5>
+        </div>
+        <div class="modal-body">
+          <form id="login-form">
+            <div class="mb-3">
+              <label for="login-username" class="form-label">帳號</label>
+              <input type="text" class="form-control" id="login-username" placeholder="請輸入帳號" required>
+            </div>
+            <div class="mb-3">
+              <label for="login-password" class="form-label">密碼</label>
+              <input type="password" class="form-control" id="login-password" placeholder="請輸入密碼" required>
+            </div>
+            <div id="login-error" class="alert alert-danger d-none" role="alert"></div>
+            <button type="submit" class="btn btn-primary w-100">登入</button>
+          </form>
+          <div class="mt-3 text-center text-muted small">
+            預設管理員: admin / admin123<br>
+            預設使用者: user / user123
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <nav class="navbar fixed-top builder-navbar">
     <div class="navbar-container">
       <!-- Left: Logo -->
       <div class="navbar-left">
         <a href="#" class="navbar-logo-link" id="builder-logo-link">
-          <img src="ultrarag.svg" alt="UltraRAG" class="navbar-logo-img">
+          <img src="enterprise_logo.svg" alt="企業 Agent POC" class="navbar-logo-img" style="height: 32px; width: auto;">
         </a>
       </div>
 
-      <!-- Right: Pipeline label -->
+      <!-- Right: Pipeline label + User info -->
       <div class="navbar-right">
-        <span class="pipeline-label text-muted small" id="hero-selected-pipeline">No Pipeline Selected</span>
+        <span class="pipeline-label text-muted small" id="hero-selected-pipeline">尚未選擇 Pipeline</span>
         <div class="vr mx-2"></div>
-        <button class="btn btn-sm btn-ghost text-primary" id="navbar-ai-btn" title="AI Assistant">
+        <!-- User info (shown when logged in) -->
+        <div id="user-info" class="d-none">
+          <span class="text-muted small me-2" id="user-display-name"></span>
+          <span class="badge bg-secondary me-2" id="user-role-badge"></span>
+          <button class="btn btn-sm btn-outline-secondary" id="logout-btn" title="登出">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+              <polyline points="16 17 21 12 16 7"></polyline>
+              <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="vr mx-2" id="user-divider" style="display:none;"></div>
+        <button class="btn btn-sm btn-ghost text-primary" id="navbar-ai-btn" title="AI 助理">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path
@@ -38,13 +88,13 @@
             <circle cx="7.5" cy="14.5" r="1.5" />
             <circle cx="16.5" cy="14.5" r="1.5" />
           </svg>
-          <span class="ms-1 fw-semibold">AI Assistant</span>
+          <span class="ms-1 fw-semibold">AI 助理</span>
         </button>
       </div>
     </div>
   </nav>
 
-  <main class="canvas-main" id="pipeline-form">
+  <main class="canvas-main d-none" id="pipeline-form">
     <!-- New layout: feature bar + content area -->
     <div class="workspace-layout">
 
@@ -52,7 +102,7 @@
       <aside class="workspace-sidebar">
         <nav class="workspace-nav">
           <div class="workspace-nav-top">
-            <button class="workspace-nav-btn active" data-mode="pipeline" title="Pipeline YAML">
+            <button class="workspace-nav-btn active" data-mode="pipeline" title="Pipeline 編輯">
               <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="16 18 22 12 16 6"></polyline>
@@ -60,7 +110,7 @@
               </svg>
               <span class="nav-label">Pipeline</span>
             </button>
-            <button class="workspace-nav-btn" data-mode="parameters" title="Parameters">
+            <button class="workspace-nav-btn" data-mode="parameters" title="參數設定">
               <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="3"></circle>
@@ -68,9 +118,9 @@
                   d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
                 </path>
               </svg>
-              <span class="nav-label">Params</span>
+              <span class="nav-label">參數</span>
             </button>
-            <button class="workspace-nav-btn" data-mode="prompts" title="Prompt Templates">
+            <button class="workspace-nav-btn" data-mode="prompts" title="Prompt 範本">
               <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -79,17 +129,17 @@
                 <line x1="16" y1="17" x2="8" y2="17"></line>
                 <polyline points="10 9 9 9 8 9"></polyline>
               </svg>
-              <span class="nav-label">Prompts</span>
+              <span class="nav-label">Prompt</span>
             </button>
           </div>
           <div class="workspace-nav-spacer"></div>
           <div class="workspace-nav-divider" aria-hidden="true"></div>
-          <button class="workspace-nav-btn" id="workspace-chat-btn" title="Chat">
+          <button class="workspace-nav-btn" id="workspace-chat-btn" title="對話">
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
-            <span class="nav-label">Chat</span>
+            <span class="nav-label">對話</span>
           </button>
         </nav>
       </aside>
@@ -106,7 +156,7 @@
                   <div class="dropdown">
                     <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
                       id="pipelineDropdownBtn" data-bs-toggle="dropdown" aria-expanded="false">
-                      Select Pipeline
+                      選擇 Pipeline
                     </button>
                     <ul class="dropdown-menu shadow-sm border-0" id="pipeline-menu"></ul>
                   </div>
@@ -130,11 +180,11 @@
                     <polyline points="16 18 22 12 16 6"></polyline>
                     <polyline points="8 6 2 12 8 18"></polyline>
                   </svg>
-                  <input type="text" id="pipeline-name" class="pipeline-name-input" placeholder="Pipeline Name..." />
+                  <input type="text" id="pipeline-name" class="pipeline-name-input" placeholder="Pipeline 名稱..." />
                 </div>
                 <div class="panel-toolbar">
                   <button type="button" id="new-pipeline-btn" class="btn btn-sm builder-action-btn"
-                    title="New Pipeline">
+                    title="新增 Pipeline">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -149,23 +199,23 @@
                       <polyline points="17 21 17 13 7 13 7 21"></polyline>
                       <polyline points="7 3 7 8 15 8"></polyline>
                     </svg>
-                    Save
+                    儲存
                   </button>
                   <button type="button" id="build-pipeline" class="btn btn-sm builder-action-btn">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
                     </svg>
-                    Build
+                    建置
                   </button>
                   <button type="button" id="delete-pipeline"
-                    class="btn btn-sm builder-action-btn builder-action-btn--danger" title="Delete">
+                    class="btn btn-sm builder-action-btn builder-action-btn--danger" title="刪除">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <polyline points="3 6 5 6 21 6"></polyline>
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                     </svg>
-                    Delete
+                    刪除
                   </button>
                   <span id="yaml-sync-status" class="sync-status synced" title="Synced">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -201,8 +251,8 @@
             <!-- Left: Server navigation -->
             <aside class="params-sidebar">
               <div class="params-sidebar-header">
-                <span>Servers</span>
-                <button type="button" id="params-refresh-btn" class="btn btn-sm btn-ghost" title="Reload Parameters">
+                <span>伺服器</span>
+                <button type="button" id="params-refresh-btn" class="btn btn-sm btn-ghost" title="重新載入參數">
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <polyline points="23 4 23 10 17 10"></polyline>
@@ -225,7 +275,7 @@
                       d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
                     </path>
                   </svg>
-                  <span class="panel-title">Parameters</span>
+                  <span class="panel-title">參數</span>
                 </div>
                 <div class="panel-toolbar">
                   <button type="button" id="params-save-btn" class="btn btn-sm btn-dark">
@@ -235,7 +285,7 @@
                       <polyline points="17 21 17 13 7 13 7 21"></polyline>
                       <polyline points="7 3 7 8 15 8"></polyline>
                     </svg>
-                    Save
+                    儲存
                   </button>
                 </div>
               </div>
@@ -248,7 +298,7 @@
                       d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
                     </path>
                   </svg>
-                  <p>Please <strong>Build</strong> a pipeline first to configure parameters.</p>
+                  <p>請先<strong>建置</strong> Pipeline 以設定參數。</p>
                 </div>
                 <div id="parameter-form" class="params-sections"></div>
               </div>
@@ -284,14 +334,14 @@
                 </div>
                 <div class="panel-toolbar prompt-toolbar">
                   <input type="text" id="prompt-search" class="form-control form-control-sm prompt-search-input"
-                    placeholder="Search prompts...">
-                  <button type="button" id="prompt-new-btn" class="btn btn-sm builder-action-btn" title="New Prompt">
+                    placeholder="搜尋 Prompt...">
+                  <button type="button" id="prompt-new-btn" class="btn btn-sm builder-action-btn" title="新增 Prompt">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <line x1="12" y1="5" x2="12" y2="19"></line>
                       <line x1="5" y1="12" x2="19" y2="12"></line>
                     </svg>
-                    New
+                    新增
                   </button>
                   <button type="button" id="prompt-save-btn" class="btn btn-sm builder-action-btn" disabled>
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -300,16 +350,16 @@
                       <polyline points="17 21 17 13 7 13 7 21"></polyline>
                       <polyline points="7 3 7 8 15 8"></polyline>
                     </svg>
-                    Save
+                    儲存
                   </button>
                   <button type="button" id="prompt-delete-btn"
-                    class="btn btn-sm builder-action-btn builder-action-btn--danger" disabled title="Delete">
+                    class="btn btn-sm builder-action-btn builder-action-btn--danger" disabled title="刪除">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <polyline points="3 6 5 6 21 6"></polyline>
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                     </svg>
-                    Delete
+                    刪除
                   </button>
                 </div>
               </div>
@@ -324,7 +374,7 @@
                     <line x1="16" y1="17" x2="8" y2="17"></line>
                     <polyline points="10 9 9 9 8 9"></polyline>
                   </svg>
-                  <p>Select a prompt file from the list or create a new one.</p>
+                  <p>從列表中選擇一個 Prompt 檔案或建立新檔案。</p>
                 </div>
                 <div class="prompt-editor-wrapper d-none" id="prompt-editor-wrapper">
                   <div class="prompt-gutter" id="prompt-line-numbers"></div>
@@ -347,9 +397,9 @@
             <polyline points="4 17 10 11 4 5"></polyline>
             <line x1="12" y1="19" x2="20" y2="19"></line>
           </svg>
-          <span>Console</span>
+          <span>控制台</span>
         </div>
-        <button type="button" class="console-toggle-btn" title="Toggle Console">
+        <button type="button" class="console-toggle-btn" title="切換控制台">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="chevron-icon">
             <polyline points="18 15 12 9 6 15"></polyline>
@@ -366,10 +416,10 @@
   <div id="parameter-panel" class="view-overlay d-none fade-in">
     <header class="view-header">
       <div class="btn-back-wrapper">
-        <button type="button" id="parameter-back" class="btn-back" title="Return to Flow Canvas">←</button>
+        <button type="button" id="parameter-back" class="btn-back" title="返回流程畫布">←</button>
       </div>
       <div class="text-center">
-        <h2 class="m-0 fs-5 fw-semibold">Parameter Configuration</h2>
+        <h2 class="m-0 fs-5 fw-semibold">參數配置</h2>
       </div>
     </header>
 
@@ -384,7 +434,7 @@
             <line x1="6" y1="6" x2="6.01" y2="6"></line>
             <line x1="6" y1="18" x2="6.01" y2="18"></line>
           </svg>
-          <span>Servers</span>
+          <span>伺服器</span>
         </div>
         <nav id="parameter-nav" class="parameter-nav"></nav>
       </aside>
@@ -392,8 +442,7 @@
       <!-- Right: parameter configuration area -->
       <main class="parameter-main">
         <div class="parameter-content">
-          <p class="parameter-hint">Select a server from the left to configure its parameters, or expand all sections
-            below.</p>
+          <p class="parameter-hint">從左側選擇伺服器來配置其參數，或展開下方所有區段。</p>
           <div id="parameter-form" class="parameter-sections"></div>
         </div>
 
@@ -405,30 +454,30 @@
               <polyline points="17 21 17 13 7 13 7 21"></polyline>
               <polyline points="7 3 7 8 15 8"></polyline>
             </svg>
-            Save Parameters
+            儲存參數
           </button>
           <button type="button" class="btn btn-ai-gradient btn-pill px-4 py-2" id="parameter-chat">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
-            Enter Chat Mode
+            進入對話模式
           </button>
         </div>
       </main>
     </div>
   </div>
 
-  <section id="chat-view" class="view-overlay d-none">
+  <section id="chat-view" class="view-overlay">
     <div class="chat-layout">
 
       <aside class="chat-sidebar">
         <div class="sidebar-header">
           <div class="sidebar-toggle-wrapper">
             <button type="button" id="chat-logo-btn" class="sidebar-logo sidebar-logo-btn">
-              <img src="ultrarag.svg" alt="UltraRAG" class="sidebar-logo-img">
+              <img src="enterprise_logo.svg" alt="企業 Agent POC" class="sidebar-logo-img" style="height: 28px; width: auto;">
             </button>
-            <button type="button" id="sidebar-toggle-btn" class="btn-sidebar-toggle" title="Toggle Sidebar">
+            <button type="button" id="sidebar-toggle-btn" class="btn-sidebar-toggle" title="切換側邊欄">
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -445,7 +494,7 @@
                   d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
               </svg>
             </span>
-            <span class="btn-text">New Chat</span>
+            <span class="btn-text">新對話</span>
           </button>
 
           <button type="button" id="kb-btn" class="btn-nav">
@@ -456,7 +505,7 @@
                   d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
               </svg>
             </span>
-            <span class="btn-text">Knowledge Base</span>
+            <span class="btn-text">知識庫</span>
           </button>
         </div>
 
@@ -464,10 +513,10 @@
           <div class="chat-session-bar">
             <div class="chat-session-bar-title">
               <!-- <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg> -->
-              <span>Recent</span>
+              <span>最近對話</span>
             </div>
             <div class="chat-session-bar-actions">
-              <button class="chat-session-bar-btn" id="clear-all-chats" title="Clear all chats">
+              <button class="chat-session-bar-btn" id="clear-all-chats" title="清除所有對話">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="3 6 5 6 21 6"></polyline>
@@ -503,8 +552,8 @@
           <div class="pipeline-selector-wrapper dropdown">
             <button class="btn btn-pipeline-select dropdown-toggle" type="button" id="chatPipelineDropdown"
               data-bs-toggle="dropdown" aria-expanded="false">
-              <span class="fw-bold fs-6" id="chat-pipeline-label">Select Pipeline</span>
-              <span class="ms-1 small" style="color: #8f8f8f;">UltraRAG</span>
+              <span class="fw-bold fs-6" id="chat-pipeline-label">選擇 Pipeline</span>
+              <span class="ms-1 small" style="color: #8f8f8f;">企業 Agent</span>
             </button>
             <ul class="dropdown-menu shadow-lg border-0 rounded-4 mt-2 p-2" id="chat-pipeline-menu"
               style="min-width: 240px;">
@@ -525,7 +574,10 @@
           <div class="chat-input-wrapper">
             <form id="chat-form" class="chat-input-container shadow-sm">
 
-              <textarea id="chat-input" class="form-control chat-input" placeholder="Ask UltraRAG" autocomplete="off"
+              <!-- Attached files preview -->
+              <div id="chat-attached-files" class="chat-attached-files" style="display:none;"></div>
+
+              <textarea id="chat-input" class="form-control chat-input" placeholder="請輸入您的問題..." autocomplete="off"
                 rows="1"></textarea>
 
               <div class="actions-row">
@@ -540,7 +592,7 @@
                         <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
                         <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
                       </svg>
-                      <span id="kb-label-text">Knowledge Base</span>
+                      <span id="kb-label-text">知識庫</span>
                       <span id="kb-clear-btn" class="kb-clear-btn" onclick="clearKbSelection(event)"
                         style="display:none; margin-left: 4px; color: #999; cursor: pointer; align-items: center;">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -558,25 +610,37 @@
                     <div class="kb-dropdown-menu" id="kb-dropdown-menu">
                       <div class="kb-dropdown-item selected" data-value="" onclick="selectKbOption(this)">
                         <span class="kb-item-check">✓</span>
-                        <span class="kb-item-text">No Knowledge Base</span>
+                        <span class="kb-item-text">No 知識庫</span>
                       </div>
                     </div>
                     <!-- Hidden native select for form submission and state management -->
                     <select id="chat-collection-select" class="kb-select-hidden" style="display:none;">
-                      <option value="" selected>No Knowledge Base</option>
+                      <option value="" selected>無知識庫</option>
                     </select>
                   </div>
 
                   <div class="bg-mode-toggle" id="bg-mode-toggle" onclick="toggleBackgroundMode()"
-                    title="Send to background">
+                    title="在背景執行">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
                       class="bg-icon-svg">
                       <line x1="22" y1="2" x2="11" y2="13"></line>
                       <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                     </svg>
-                    <span id="bg-label-text">Background</span>
+                    <span id="bg-label-text">背景</span>
                   </div>
+
+                  <!-- Chat file upload button -->
+                  <div class="chat-file-upload" id="chat-file-upload" onclick="document.getElementById('chat-file-input').click()"
+                    title="上傳檔案 (PDF, DOC, TXT)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                    </svg>
+                    <span id="chat-file-label">附件</span>
+                    <span id="chat-file-count" class="chat-file-count" style="display:none;">0</span>
+                  </div>
+                  <input type="file" id="chat-file-input" multiple accept=".pdf,.doc,.docx,.txt,.md" style="display:none;" onchange="handleChatFileSelect(this)">
                 </div>
 
                 <div class="right-actions">
@@ -600,20 +664,20 @@
       <div class="kb-main d-none" id="kb-main-view">
         <header
           class="view-header border-bottom px-4 py-3 d-flex justify-content-between align-items-center bg-white sticky-top">
-          <h3 class="m-0 fs-5 fw-bold text-dark">Collections</h3>
+          <h3 class="m-0 fs-5 fw-bold text-dark">知識庫集合</h3>
 
           <div class="d-flex gap-2 align-items-center">
             <div class="kb-connection-group">
               <button type="button" class="kb-conn-chip" id="db-connection-chip" onclick="openDbConfigModal()"
-                title="Endpoint">
+                title="連線端點">
                 <span id="db-connection-status" class="kb-conn-dot disconnected"></span>
-                <span id="db-connection-text" class="kb-conn-text">Connecting</span>
+                <span id="db-connection-text" class="kb-conn-text">連線中</span>
               </button>
               <small class="kb-conn-uri" id="db-uri-display">—</small>
             </div>
 
             <button class="btn btn-outline-secondary btn-sm" onclick="openDbConfigModal()">
-              Configure DB
+              資料庫設定
             </button>
 
             <button class="btn btn-dark btn-sm px-3 d-flex align-items-center gap-2" onclick="openImportModal()">
@@ -622,7 +686,7 @@
                 <line x1="12" y1="5" x2="12" y2="19"></line>
                 <line x1="5" y1="12" x2="19" y2="12"></line>
               </svg>
-              New Collection
+              新增集合
             </button>
           </div>
         </header>
@@ -638,12 +702,12 @@
         <div class="d-flex flex-column h-100">
           <div class="modal-header px-4 py-3 border-bottom d-flex justify-content-between align-items-center bg-white">
             <div>
-              <h5 class="m-0 fw-bold">Import Knowledge</h5>
-              <small class="text-muted">Process raw documents into vector index.</small>
+              <h5 class="m-0 fw-bold">匯入知識</h5>
+              <small class="text-muted">將原始文件處理成向量索引。</small>
             </div>
             <div class="d-flex gap-2">
               <button class="btn btn-light btn-sm text-danger" onclick="clearStagingArea()"
-                title="Clear all temporary files">Delete All</button>
+                title="Clear all temporary files">全部刪除</button>
               <button class="btn-close" onclick="closeImportModal()"></button>
             </div>
           </div>
@@ -652,7 +716,7 @@
 
             <div id="task-status-bar" class="status-bar hidden mb-3 mx-auto shadow-sm">
               <span class="spinner"></span>
-              <span id="task-msg">Processing...</span>
+              <span id="task-msg">處理中...</span>
             </div>
 
             <div class="kb-pipeline-grid flex-grow-1">
@@ -661,12 +725,12 @@
                 <div class="card-head d-flex justify-content-between align-items-center">
                   <div class="head-title d-flex align-items-center">
                     <span class="step-badge rounded-circle d-flex align-items-center justify-content-center">1</span>
-                    <span class="fw-bold text-dark small">Raw Files</span>
+                    <span class="fw-bold text-dark small">原始檔案</span>
                   </div>
                   <input type="file" id="file-upload" multiple hidden onchange="handleFileUpload(this)">
                   <button class="btn btn-dark btn-sm py-0 px-2" style="font-size: 0.8rem;"
                     onclick="document.getElementById('file-upload').click()">
-                    Upload
+                    上傳
                   </button>
                 </div>
                 <div class="card-body-scroll" id="list-raw"></div>
@@ -676,7 +740,7 @@
                 <div class="card-head d-flex justify-content-between align-items-center">
                   <div class="head-title d-flex align-items-center">
                     <span class="step-badge rounded-circle d-flex align-items-center justify-content-center">2</span>
-                    <span class="fw-bold text-dark small">Corpus</span>
+                    <span class="fw-bold text-dark small">語料庫</span>
                   </div>
                   <button class="btn btn-light border btn-sm py-0 px-2 text-muted d-flex align-items-center gap-1"
                     style="font-size: 0.75rem;" onclick="openChunkConfigModal()">
@@ -687,7 +751,7 @@
                         d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
                       </path>
                     </svg>
-                    Settings
+                    設定
                   </button>
                 </div>
                 <div class="card-body-scroll" id="list-corpus"></div>
@@ -697,7 +761,7 @@
                 <div class="card-head d-flex justify-content-between align-items-center">
                   <div class="head-title d-flex align-items-center">
                     <span class="step-badge rounded-circle d-flex align-items-center justify-content-center">3</span>
-                    <span class="fw-bold text-dark small">Chunks</span>
+                    <span class="fw-bold text-dark small">文字區塊</span>
                   </div>
                   <button class="btn btn-light border btn-sm py-0 px-2 text-muted d-flex align-items-center gap-1"
                     style="font-size: 0.75rem;" onclick="openIndexConfigModal()">
@@ -708,7 +772,7 @@
                         d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
                       </path>
                     </svg>
-                    Settings
+                    設定
                   </button>
                 </div>
                 <div class="card-body-scroll" id="list-chunks"></div>
@@ -720,11 +784,11 @@
 
       <aside class="chat-detail-sidebar" id="source-detail-panel">
         <div class="detail-header">
-          <h3 class="detail-title">Reference Detail</h3>
+          <h3 class="detail-title">參考資料詳情</h3>
           <button class="btn btn-icon btn-sm" onclick="closeSourceDetail()">✕</button>
         </div>
         <div class="detail-content" id="source-detail-content">
-          <div class="text-muted small text-center mt-5">Select a reference to view details</div>
+          <div class="text-muted small text-center mt-5">選擇參考資料以查看詳情</div>
         </div>
       </aside>
 
@@ -733,11 +797,11 @@
 
   <div id="step-editor" class="step-editor-modal" hidden>
     <div class="step-editor-content">
-      <h6 class="mb-3 fw-semibold">Edit Node Configuration</h6>
+      <h6 class="mb-3 fw-semibold">編輯節點配置</h6>
       <textarea id="step-editor-value" rows="8" class="form-control code-font mb-3"></textarea>
       <div class="d-flex justify-content-end gap-2">
-        <button type="button" id="step-editor-cancel" class="btn btn-sm btn-light border">Cancel</button>
-        <button type="button" id="step-editor-save" class="btn btn-sm btn-dark">Apply</button>
+        <button type="button" id="step-editor-cancel" class="btn btn-sm btn-light border">取消</button>
+        <button type="button" id="step-editor-save" class="btn btn-sm btn-dark">套用</button>
       </div>
     </div>
   </div>
@@ -746,7 +810,7 @@
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content border-0 shadow-lg rounded-4">
         <div class="modal-header border-0 pb-0">
-          <h5 class="modal-title fw-semibold">Add Node</h5>
+          <h5 class="modal-title fw-semibold">新增節點</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body pt-2">
@@ -781,69 +845,69 @@
           <div id="node-picker-error" class="text-danger small mt-2 d-none"></div>
         </div>
         <div class="modal-footer border-0 pt-0">
-          <button type="button" class="btn btn-dark w-100 rounded-3 py-2" id="nodePickerConfirm">Confirm Add</button>
+          <button type="button" class="btn btn-dark w-100 rounded-3 py-2" id="nodePickerConfirm">確認新增</button>
         </div>
       </div>
     </div>
   </div>
 
   <dialog id="milvus-dialog" class="apple-modal">
-    <h5 class="mb-3 fw-bold">Build Vector Index</h5>
+    <h5 class="mb-3 fw-bold">建立向量索引</h5>
 
     <div class="alert alert-light border mb-3 p-2 small">
-      Target: <strong id="modal-target-db">Loading Configuration...</strong>
+      目標：<strong id="modal-target-db">載入設定中...</strong>
     </div>
 
     <div class="mb-3">
-      <label class="form-label small text-muted text-uppercase fw-bold" id="idx-collection-label">Collection Name</label>
-      <input type="text" id="idx-collection" class="form-control" placeholder="e.g. wiki_v1">
+      <label class="form-label small text-muted text-uppercase fw-bold" id="idx-collection-label">集合名稱</label>
+      <input type="text" id="idx-collection" class="form-control" placeholder="例如：wiki_v1">
       <select id="idx-collection-select" class="form-select d-none"></select>
     </div>
 
     <div class="mb-4">
-      <label class="form-label small text-muted text-uppercase fw-bold">Mode</label>
+      <label class="form-label small text-muted text-uppercase fw-bold">模式</label>
       <select id="idx-mode" class="form-select">
-        <option value="new">New</option>
-        <option value="append">Append</option>
-        <option value="overwrite">Overwrite</option>
+        <option value="new">新建</option>
+        <option value="append">追加</option>
+        <option value="overwrite">覆蓋</option>
       </select>
     </div>
 
     <div class="modal-actions d-flex justify-content-end gap-2">
       <button class="btn btn-light border btn-sm"
-        onclick="document.getElementById('milvus-dialog').close()">Cancel</button>
-      <button class="btn btn-dark btn-sm" onclick="confirmIndexTask()">Start Indexing</button>
+        onclick="document.getElementById('milvus-dialog').close()">取消</button>
+      <button class="btn btn-dark btn-sm" onclick="confirmIndexTask()">開始索引</button>
     </div>
   </dialog>
 
   <dialog id="db-config-modal" class="apple-modal">
-    <h5 class="mb-3 fw-bold">Database Settings</h5>
+    <h5 class="mb-3 fw-bold">資料庫設定</h5>
 
     <div class="mb-3">
-      <label class="form-label small text-muted text-uppercase fw-bold">Milvus URI</label>
-      <input type="text" id="cfg-uri" class="form-control" placeholder="path/to/local.db OR http://localhost:19530">
-      <div class="form-text">Supports local file paths or remote HTTP/TCP connections.</div>
+      <label class="form-label small text-muted text-uppercase fw-bold">Milvus 連線位址</label>
+      <input type="text" id="cfg-uri" class="form-control" placeholder="path/to/local.db 或 http://localhost:19530">
+      <div class="form-text">支援本地檔案路徑或遠端 HTTP/TCP 連線。</div>
     </div>
 
     <div class="mb-4">
-      <label class="form-label small text-muted text-uppercase fw-bold">Token (Optional)</label>
-      <input type="password" id="cfg-token" class="form-control" placeholder="API Key or user:password">
+      <label class="form-label small text-muted text-uppercase fw-bold">Token（選用）</label>
+      <input type="password" id="cfg-token" class="form-control" placeholder="API Key 或 user:password">
     </div>
 
     <div class="modal-actions d-flex justify-content-end gap-2">
       <button class="btn btn-light border btn-sm"
-        onclick="document.getElementById('db-config-modal').close()">Cancel</button>
-      <button class="btn btn-dark btn-sm" onclick="saveDbConfig()">Save & Connect</button>
+        onclick="document.getElementById('db-config-modal').close()">取消</button>
+      <button class="btn btn-dark btn-sm" onclick="saveDbConfig()">儲存並連線</button>
     </div>
   </dialog>
 
   <dialog id="folder-detail-modal" class="apple-modal">
-    <h5 class="mb-3 fw-bold" id="folder-detail-title">Folder Contents</h5>
+    <h5 class="mb-3 fw-bold" id="folder-detail-title">資料夾內容</h5>
     <div id="folder-detail-list" class="folder-list-container" style="max-height: 300px; overflow-y: auto;">
     </div>
     <div class="modal-actions d-flex justify-content-end mt-3">
       <button class="btn btn-dark btn-sm"
-        onclick="document.getElementById('folder-detail-modal').close()">Close</button>
+        onclick="document.getElementById('folder-detail-modal').close()">關閉</button>
     </div>
   </dialog>
 
@@ -851,51 +915,51 @@
     style="margin: auto; border:none; border-radius:12px; padding:0; box-shadow: 0 10px 25px rgba(0,0,0,0.2); overflow: visible; max-width: 90vw;">
     <div class="card" style="width: 380px; border:none;">
       <div class="card-header bg-white border-bottom pt-3 pb-2 d-flex justify-content-between align-items-center">
-        <h6 class="card-title m-0 fw-bold">Chunk Configuration</h6>
+        <h6 class="card-title m-0 fw-bold">分塊設定</h6>
         <button type="button" class="btn-close small"
           onclick="document.getElementById('chunk-config-modal').close()"></button>
       </div>
       <div class="card-body">
         <form id="chunk-config-form">
           <div class="mb-3">
-            <label class="form-label small fw-bold text-muted">Chunk Backend</label>
+            <label class="form-label small fw-bold text-muted">分塊方式</label>
             <select id="cfg-chunk-backend" class="form-select form-select-sm">
-              <option value="token" selected>token</option>
-              <option value="sentence">sentence</option>
-              <option value="recursive">recursive</option>
+              <option value="token" selected>token（字元）</option>
+              <option value="sentence">sentence（句子）</option>
+              <option value="recursive">recursive（遞迴）</option>
             </select>
           </div>
 
           <div class="mb-3">
-            <label class="form-label small fw-bold text-muted">Tokenizer / Counter</label>
+            <label class="form-label small fw-bold text-muted">分詞器</label>
             <select id="cfg-chunk-tokenizer" class="form-select form-select-sm">
               <option value="gpt2" selected>gpt2</option>
-              <option value="character">character</option>
-              <option value="word">word</option>
+              <option value="character">character（字元）</option>
+              <option value="word">word（單字）</option>
             </select>
           </div>
 
           <div class="mb-3">
-            <label class="form-label small fw-bold text-muted">Chunk Size</label>
+            <label class="form-label small fw-bold text-muted">分塊大小</label>
             <div class="input-group input-group-sm">
               <input type="number" id="cfg-chunk-size" class="form-control" value="500" min="1">
             </div>
           </div>
 
           <div class="mb-1">
-            <label class="form-label small fw-bold text-muted">Use Title</label>
+            <label class="form-label small fw-bold text-muted">使用標題</label>
             <select id="cfg-chunk-title" class="form-select form-select-sm">
-              <option value="true" selected>True</option>
-              <option value="false">False</option>
+              <option value="true" selected>是</option>
+              <option value="false">否</option>
             </select>
-            <div class="form-text text-xs">Prepend document title to each chunk.</div>
+            <div class="form-text text-xs">在每個分塊前加上文件標題。</div>
           </div>
         </form>
       </div>
       <div class="card-footer bg-light border-top d-flex justify-content-end gap-2 py-2">
         <button type="button" class="btn btn-sm btn-light border"
-          onclick="document.getElementById('chunk-config-modal').close()">Cancel</button>
-        <button type="button" class="btn btn-sm btn-dark" onclick="saveChunkConfig()">Save Config</button>
+          onclick="document.getElementById('chunk-config-modal').close()">取消</button>
+        <button type="button" class="btn btn-sm btn-dark" onclick="saveChunkConfig()">儲存設定</button>
       </div>
     </div>
   </dialog>
@@ -904,39 +968,39 @@
     style="margin: auto; border:none; border-radius:12px; padding:0; box-shadow: 0 10px 25px rgba(0,0,0,0.2); overflow: visible; max-width: 90vw;">
     <div class="card" style="width: 420px; border:none;">
       <div class="card-header bg-white border-bottom pt-3 pb-2 d-flex justify-content-between align-items-center">
-        <h6 class="card-title m-0 fw-bold">Embedding Configuration</h6>
+        <h6 class="card-title m-0 fw-bold">嵌入模型設定</h6>
         <button type="button" class="btn-close small"
           onclick="document.getElementById('index-config-modal').close()"></button>
       </div>
       <div class="card-body">
-        <p class="text-muted small mb-3">Configure the embedding model for vector indexing. Uses OpenAI-compatible API.
+        <p class="text-muted small mb-3">設定向量索引的嵌入模型。使用 OpenAI 相容 API。
         </p>
         <form id="index-config-form">
           <div class="mb-3">
             <label class="form-label small fw-bold text-muted">API Key</label>
             <input type="password" id="cfg-emb-api-key" class="form-control form-control-sm" placeholder="sk-...">
-            <div class="form-text text-xs">Your OpenAI or compatible API key.</div>
+            <div class="form-text text-xs">您的 OpenAI 或相容 API 金鑰。</div>
           </div>
 
           <div class="mb-3">
-            <label class="form-label small fw-bold text-muted">Base URL</label>
+            <label class="form-label small fw-bold text-muted">API 端點</label>
             <input type="text" id="cfg-emb-base-url" class="form-control form-control-sm"
               value="https://api.openai.com/v1" placeholder="https://api.openai.com/v1">
-            <div class="form-text text-xs">API endpoint. Change for Azure, local models, etc.</div>
+            <div class="form-text text-xs">API 端點網址。可更改為 Azure、本地模型等。</div>
           </div>
 
           <div class="mb-1">
-            <label class="form-label small fw-bold text-muted">Model Name</label>
+            <label class="form-label small fw-bold text-muted">模型名稱</label>
             <input type="text" id="cfg-emb-model-name" class="form-control form-control-sm"
               value="text-embedding-3-small" placeholder="text-embedding-3-small">
-            <div class="form-text text-xs">e.g. text-embedding-3-small, text-embedding-ada-002</div>
+            <div class="form-text text-xs">例如：text-embedding-3-small、text-embedding-ada-002</div>
           </div>
         </form>
       </div>
       <div class="card-footer bg-light border-top d-flex justify-content-end gap-2 py-2">
         <button type="button" class="btn btn-sm btn-light border"
-          onclick="document.getElementById('index-config-modal').close()">Cancel</button>
-        <button type="button" class="btn btn-sm btn-dark" onclick="saveIndexConfig()">Save Config</button>
+          onclick="document.getElementById('index-config-modal').close()">取消</button>
+        <button type="button" class="btn btn-sm btn-dark" onclick="saveIndexConfig()">儲存設定</button>
       </div>
     </div>
   </dialog>
@@ -944,7 +1008,7 @@
   <!-- Background Task Notification Toast -->
   <div id="notification-container" class="notification-container"></div>
 
-  <!-- Background Tasks Panel -->
+  <!-- 背景任務 Panel -->
   <div id="background-tasks-panel" class="bg-tasks-panel d-none">
     <div class="bg-tasks-header">
       <h6>
@@ -953,12 +1017,12 @@
           <line x1="22" y1="2" x2="11" y2="13"></line>
           <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
         </svg>
-        Background Tasks
+        背景任務
       </h6>
       <div class="d-flex gap-1 align-items-center">
-        <button onclick="refreshBackgroundTasks()" title="Refresh">↻</button>
-        <button onclick="clearCompletedTasks()" title="Clear completed">Clear</button>
-        <button class="bg-panel-close-btn" onclick="toggleBackgroundPanel()" title="Close">
+        <button onclick="refreshBackgroundTasks()" title="重新整理">↻</button>
+        <button onclick="clearCompletedTasks()" title="清除已完成">清除</button>
+        <button class="bg-panel-close-btn" onclick="toggleBackgroundPanel()" title="關閉">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -972,8 +1036,8 @@
     </div>
   </div>
 
-  <!-- Background Tasks Floating Button -->
-  <button id="bg-tasks-fab" class="bg-tasks-fab d-none" onclick="toggleBackgroundPanel()" title="Background Tasks">
+  <!-- 背景任務 Floating Button -->
+  <button id="bg-tasks-fab" class="bg-tasks-fab d-none" onclick="toggleBackgroundPanel()" title="背景任務">
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
       stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="bg-icon-svg">
       <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -1027,10 +1091,10 @@
     </button>
   </div>
 
-  <!-- AI Assistant Panel -->
+  <!-- AI 助理 Panel -->
   <div class="ai-assistant-container" id="ai-assistant-container">
     <!-- Collapsed state trigger button -->
-    <button class="ai-assistant-trigger" id="ai-assistant-trigger" title="AI Assistant">
+    <button class="ai-assistant-trigger" id="ai-assistant-trigger" title="AI 助理">
       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path
@@ -1057,16 +1121,16 @@
               <circle cx="7.5" cy="14.5" r="1.5" />
               <circle cx="16.5" cy="14.5" r="1.5" />
             </svg>
-            <span>AI Assistant</span>
+            <span>AI 助理</span>
           </div>
           <div class="ai-panel-actions">
-            <button class="ai-panel-btn d-none" id="ai-back-btn" title="Back to list">
+            <button class="ai-panel-btn d-none" id="ai-back-btn" title="返回列表">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="15 18 9 12 15 6"></polyline>
               </svg>
             </button>
-            <button class="ai-panel-btn" id="ai-settings-btn" title="Settings">
+            <button class="ai-panel-btn" id="ai-settings-btn" title="設定">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="3"></circle>
@@ -1075,7 +1139,7 @@
                 </path>
               </svg>
             </button>
-            <button class="ai-panel-btn" id="ai-close-btn" title="Close">
+            <button class="ai-panel-btn" id="ai-close-btn" title="關閉">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -1089,9 +1153,9 @@
         <div class="ai-connection-status" id="ai-connection-status">
           <div class="ai-status-left">
             <span class="ai-status-dot disconnected"></span>
-            <span class="ai-status-text" id="ai-status-text">Not configured</span>
+            <span class="ai-status-text" id="ai-status-text">尚未設定</span>
           </div>
-          <div class="ai-context-hint" id="ai-context-hint">No pipeline selected</div>
+          <div class="ai-context-hint" id="ai-context-hint">未選擇 Pipeline</div>
         </div>
 
         <!-- Home (Recent) -->
@@ -1105,17 +1169,17 @@
                 <path d="M8 2v4" />
                 <path d="M3 10h18" />
               </svg>
-              <span>Recent</span>
+              <span>最近對話</span>
             </div>
             <div class="ai-session-actions">
-              <button class="ai-session-btn" id="ai-session-new" title="New session">
+              <button class="ai-session-btn" id="ai-session-new" title="新對話">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="12" y1="5" x2="12" y2="19"></line>
                   <line x1="5" y1="12" x2="19" y2="12"></line>
                 </svg>
               </button>
-              <button class="ai-session-btn" id="ai-session-delete" title="Delete session">
+              <button class="ai-session-btn" id="ai-session-delete" title="刪除對話">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="3 6 5 6 21 6"></polyline>
@@ -1140,9 +1204,9 @@
                   <circle cx="16.5" cy="14.5" r="1.5" />
                 </svg>
               </div>
-              <h4>UltraRAG AI Assistant</h4>
-              <p>I can help you build pipelines, configure parameters, and edit prompts.</p>
-              <p class="ai-welcome-hint">Click the settings icon to configure your API connection.</p>
+              <h4>企業 Agent AI 助理</h4>
+              <p>我可以幫助您建立 pipeline、設定參數和編輯 prompt。</p>
+              <p class="ai-welcome-hint">點擊設定圖示來配置您的 API 連線。</p>
 
               <!-- Quick Action Cards -->
               <div class="ai-starter-chips">
@@ -1185,7 +1249,7 @@
                       <line x1="17" y1="16" x2="23" y2="16" />
                     </svg>
                   </span>
-                  <span class="ai-starter-chip-text">Parameter Settings</span>
+                  <span class="ai-starter-chip-text">參數設定</span>
                 </button>
                 <button class="ai-starter-chip"
                   data-prompt="I want to redesign my RAG workflow based on this article/paper: [Insert Link]. Please analyze its core methodologies and assist me in constructing a similar pipeline architecture.">
@@ -1198,7 +1262,7 @@
                       <path d="M10 22h4" />
                     </svg>
                   </span>
-                  <span class="ai-starter-chip-text">Free-form Tuning</span>
+                  <span class="ai-starter-chip-text">自由調整</span>
                 </button>
               </div>
             </div>
@@ -1207,9 +1271,9 @@
           <!-- Input area -->
           <div class="ai-input-area">
             <div class="ai-input-wrapper">
-              <textarea id="ai-input" class="ai-input" placeholder="Ask me anything about your pipeline..."
+              <textarea id="ai-input" class="ai-input" placeholder="詢問任何關於 Pipeline 的問題..."
                 rows="1"></textarea>
-              <button class="ai-send-btn btn-send" id="ai-send-btn" title="Send">
+              <button class="ai-send-btn btn-send" id="ai-send-btn" title="發送">
                 <span id="ai-send-icon" class="send-icon-wrapper">
                   <svg class="icon-send" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1220,7 +1284,7 @@
               </button>
             </div>
             <div class="ai-input-hint">
-              <span>Press Enter to send, Shift+Enter for new line</span>
+              <span>按 Enter 發送，Shift+Enter 換行</span>
             </div>
           </div>
         </div>
@@ -1229,8 +1293,8 @@
       <!-- Settings panel - must be inside ai-assistant-panel -->
       <div class="ai-settings-panel" id="ai-settings-panel">
         <div class="ai-settings-header">
-          <h4>AI Settings</h4>
-          <button class="ai-panel-btn" id="ai-settings-close" title="Close">
+          <h4>AI 設定</h4>
+          <button class="ai-panel-btn" id="ai-settings-close" title="關閉">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -1240,23 +1304,23 @@
         </div>
         <div class="ai-settings-body">
           <div class="ai-settings-group">
-            <label class="ai-settings-label">Provider</label>
+            <label class="ai-settings-label">提供者</label>
             <select id="ai-provider" class="ai-settings-input">
               <option value="openai">OpenAI</option>
               <option value="azure">Azure OpenAI</option>
               <option value="anthropic">Anthropic</option>
-              <option value="custom">Custom API</option>
+              <option value="custom">自訂 API</option>
             </select>
           </div>
           <div class="ai-settings-group">
-            <label class="ai-settings-label">API Base URL</label>
+            <label class="ai-settings-label">API 基礎網址</label>
             <input type="text" id="ai-base-url" class="ai-settings-input" placeholder="https://api.openai.com/v1" />
           </div>
           <div class="ai-settings-group">
-            <label class="ai-settings-label">API Key</label>
+            <label class="ai-settings-label">API 金鑰</label>
             <div class="ai-settings-input-wrapper">
               <input type="password" id="ai-api-key" class="ai-settings-input" placeholder="sk-..." />
-              <button class="ai-toggle-visibility" id="ai-toggle-key" title="Toggle visibility">
+              <button class="ai-toggle-visibility" id="ai-toggle-key" title="切換可見性">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -1266,11 +1330,11 @@
             </div>
           </div>
           <div class="ai-settings-group">
-            <label class="ai-settings-label">Model</label>
+            <label class="ai-settings-label">模型</label>
             <input type="text" id="ai-model" class="ai-settings-input" placeholder="gpt-5-mini" />
           </div>
           <div class="ai-settings-actions">
-            <button class="btn btn-sm btn-dark" id="ai-save-settings">Save & Test</button>
+            <button class="btn btn-sm btn-dark" id="ai-save-settings">儲存並測試</button>
           </div>
           <div class="ai-settings-status" id="ai-settings-status"></div>
         </div>
@@ -1286,6 +1350,8 @@
   <script src="vendor/js/auto-render.min.js"></script>
   <!-- Highlight.js for code syntax highlighting -->
   <script src="vendor/js/highlight.min.js"></script>
+  <!-- Enterprise Agent POC Authentication -->
+  <script src="auth.js"></script>
   <script src="main.js"></script>
 </body>
 

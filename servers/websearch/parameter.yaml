@@ -1,0 +1,6 @@
+# servers/websearch/parameter.yaml
+
+# Gemini Google Search Grounding Configuration
+api_key: null  # Set GOOGLE_API_KEY env var or provide here
+search_depth: basic  # Not used for Gemini (kept for compatibility)
+max_results: 5

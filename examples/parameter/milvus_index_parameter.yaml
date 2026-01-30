@@ -1,16 +1,13 @@
 retriever:
-  backend: sentence_transformers
+  # Use Gemini embeddings for cloud deployment
+  backend: gemini
   backend_configs:
-    bm25:
-      lang: en
-      save_path: index/bm25
-    infinity:
-      bettertransformer: false
-      model_warmup: false
-      pooling_method: auto
-      trust_remote_code: true
+    gemini:
+      # API key from GOOGLE_API_KEY environment variable
+      api_key: ""
+      model_name: gemini-embedding-001
     openai:
-      api_key: abc
+      api_key: ""
       base_url: https://api.openai.com/v1
       model_name: text-embedding-3-small
     sentence_transformers:
@@ -23,16 +20,17 @@ retriever:
         q_task: null
       trust_remote_code: true
   batch_size: 16
-  collection_name: wiki
+  collection_name: default_collection
   corpus_path: data/corpus_example.jsonl
   embedding_path: embedding/embedding.npy
-  gpu_ids: '1'
-  index_backend: faiss
+  gpu_ids: '0'
+  # Use Milvus backend for cloud deployment
+  index_backend: milvus
   index_backend_configs:
     faiss:
       index_chunk_size: 10000
       index_path: index/index.index
-      index_use_gpu: true
+      index_use_gpu: false
     milvus:
       id_field_name: id
       id_max_length: 64
@@ -46,10 +44,11 @@ retriever:
         params: {}
       text_field_name: contents
       text_max_length: 60000
-      token: null
-      uri: index/milvus_demo.db
+      # Empty values will fall back to environment variables (MILVUS_URI, MILVUS_TOKEN)
+      token: ""
+      uri: ""
       vector_field_name: vector
   is_demo: false
   is_multimodal: false
-  model_name_or_path: openbmb/MiniCPM-Embedding-Light
+  model_name_or_path: ""
   overwrite: false

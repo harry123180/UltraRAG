@@ -3,15 +3,15 @@ import sys
 import base64
 import mimetypes
 import traceback
+import asyncio
 from typing import Any, Dict, List, Union, Optional
-from openai import AsyncOpenAI
 
 
 class LocalGenerationService:
     """Local generation service for streaming generation in demo mode.
 
     This service provides streaming generation capabilities for the UI demo,
-    using OpenAI-compatible API endpoints.
+    supporting both OpenAI-compatible API endpoints and Google Gemini API.
     """
 
     def __init__(
@@ -27,8 +27,22 @@ class LocalGenerationService:
             backend_configs: Dictionary of backend configurations
             sampling_params: Sampling parameters for generation
             extra_params: Optional extra parameters
-            backend: Backend name (currently only "openai" is supported)
+            backend: Backend name ("openai" or "gemini")
         """
+        self.backend = backend
+        self.sampling_params = sampling_params.copy()
+        if extra_params:
+            self.sampling_params["extra_body"] = extra_params
+
+        if backend == "gemini":
+            self._init_gemini(backend_configs)
+        else:
+            self._init_openai(backend_configs)
+
+    def _init_openai(self, backend_configs: Dict[str, Any]) -> None:
+        """Initialize OpenAI backend."""
+        from openai import AsyncOpenAI
+
         openai_cfg = backend_configs.get("openai", {})
         self.model_name = openai_cfg.get("model_name")
         base_url = openai_cfg.get("base_url")
@@ -36,9 +50,39 @@ class LocalGenerationService:
 
         self.client = AsyncOpenAI(base_url=base_url, api_key=api_key)
 
-        self.sampling_params = sampling_params.copy()
-        if extra_params:
-            self.sampling_params["extra_body"] = extra_params
+    def _init_gemini(self, backend_configs: Dict[str, Any]) -> None:
+        """Initialize Gemini backend."""
+        try:
+            import google.generativeai as genai
+        except ImportError:
+            raise ImportError(
+                "google-generativeai is not installed. "
+                "Install with: pip install google-generativeai"
+            )
+
+        gemini_cfg = backend_configs.get("gemini", {})
+        api_key = gemini_cfg.get("api_key") or os.environ.get("GOOGLE_API_KEY")
+
+        if not api_key:
+            raise ValueError(
+                "Gemini API key required. Set GOOGLE_API_KEY env var or pass in backend_configs."
+            )
+
+        genai.configure(api_key=api_key)
+
+        self.model_name = gemini_cfg.get("model_name", "gemini-3-pro-preview")
+        generation_config = gemini_cfg.get("generation_config", {
+            "temperature": self.sampling_params.get("temperature", 0.7),
+            "top_p": self.sampling_params.get("top_p", 0.8),
+            "max_output_tokens": self.sampling_params.get("max_tokens", 2048),
+        })
+
+        self.genai = genai
+        self.gemini_model = genai.GenerativeModel(
+            model_name=self.model_name,
+            generation_config=generation_config,
+        )
+        self.generation_config = generation_config
 
     def _extract_text_prompts(
         self, prompt_ls: List[Union[str, Dict[str, Any]]]
@@ -207,6 +251,17 @@ class LocalGenerationService:
         if not messages:
             return
 
+        if self.backend == "gemini":
+            async for token in self._gemini_multiturn_stream(messages, system_prompt):
+                yield token
+        else:
+            async for token in self._openai_multiturn_stream(messages, system_prompt):
+                yield token
+
+    async def _openai_multiturn_stream(
+        self, messages: List[Dict[str, str]], system_prompt: str = ""
+    ):
+        """OpenAI backend for multi-turn streaming."""
         # Build complete message list
         full_messages = []
         if system_prompt:
@@ -237,6 +292,89 @@ class LocalGenerationService:
                         yield content_delta
 
         except Exception as e:
-            print("\n[LocalGen Multiturn] Error Detected:")
+            print("\n[LocalGen Multiturn OpenAI] Error Detected:")
             traceback.print_exc()
             yield f"\n[Error: {e}]"
+
+    async def _gemini_multiturn_stream(
+        self, messages: List[Dict[str, str]], system_prompt: str = ""
+    ):
+        """Gemini backend for multi-turn streaming."""
+        import queue
+        import threading
+
+        token_queue = queue.Queue()
+
+        def generate_in_thread():
+            """Run Gemini generation in a separate thread."""
+            try:
+                # Create model with system instruction if provided
+                if system_prompt:
+                    model = self.genai.GenerativeModel(
+                        model_name=self.model_name,
+                        generation_config=self.generation_config,
+                        system_instruction=system_prompt,
+                    )
+                else:
+                    model = self.gemini_model
+
+                # Convert messages to Gemini format
+                history = []
+                last_user_msg = None
+
+                for msg in messages:
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+
+                    if role == "user":
+                        last_user_msg = content
+                        history.append({"role": "user", "parts": [content]})
+                    elif role == "assistant":
+                        history.append({"role": "model", "parts": [content]})
+
+                if not history:
+                    token_queue.put(None)
+                    return
+
+                # Start chat with history (except last message)
+                chat = model.start_chat(history=history[:-1] if len(history) > 1 else [])
+
+                # Send last user message with streaming
+                response = chat.send_message(
+                    last_user_msg or history[-1]["parts"][0],
+                    stream=True,
+                )
+
+                # Put tokens into queue
+                for chunk in response:
+                    if chunk.text:
+                        token_queue.put(chunk.text)
+
+                token_queue.put(None)  # Signal completion
+
+            except Exception as e:
+                print("\n[LocalGen Multiturn Gemini] Error in thread:")
+                traceback.print_exc()
+                token_queue.put(f"\n[Error: {e}]")
+                token_queue.put(None)
+
+        # Start generation in background thread
+        thread = threading.Thread(target=generate_in_thread, daemon=True)
+        thread.start()
+
+        # Yield tokens from queue
+        while True:
+            try:
+                # Use timeout to allow async context switches
+                token = await asyncio.to_thread(token_queue.get, timeout=60)
+                if token is None:
+                    break
+                yield token
+            except queue.Empty:
+                # Timeout - check if thread is still alive
+                if not thread.is_alive():
+                    break
+            except Exception as e:
+                print(f"\n[LocalGen Multiturn Gemini] Queue error: {e}")
+                yield f"\n[Error: {e}]"
+                break

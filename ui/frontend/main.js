@@ -690,7 +690,7 @@ window.inspectFolder = async function (category, folderName, displayName) {
     if (title) title.textContent = displayName || folderName;
 
     // Show loading
-    if (listContainer) listContainer.innerHTML = '<div class="text-center text-muted p-3">Loading...</div>';
+    if (listContainer) listContainer.innerHTML = '<div class="text-center text-muted p-3">載入中...</div>';
 
     // Open modal
     if (modal) modal.showModal();
@@ -832,14 +832,14 @@ function updateDbStatusUI(status, config) {
     // Status dot & text
     const statusClass = status === 'connected' ? 'connected' : (status === 'connecting' ? 'connecting' : 'disconnected');
     els.dbConnectionStatus.className = `kb-conn-dot ${statusClass}`;
-    statusTextEl.textContent = status === 'connected' ? 'Connected' : (status === 'connecting' ? 'Connecting...' : 'Disconnected');
+    statusTextEl.textContent = status === 'connected' ? '已連線' : (status === 'connecting' ? '連線中...' : '未連線');
     chip.setAttribute('data-status', statusClass);
 
     // URI display: use shortened version in main text, full address in tooltip
-    const fullUri = (config && config.milvus && config.milvus.uri) ? config.milvus.uri : "Not configured";
+    const fullUri = (config && config.milvus && config.milvus.uri) ? config.milvus.uri : "未設定";
     const shortUri = fullUri.length > 38 ? `${fullUri.slice(0, 16)}…${fullUri.slice(-12)}` : fullUri;
     els.dbUriDisplay.textContent = shortUri;
-    chip.title = `Endpoint: ${fullUri}`;
+    chip.title = `端點: ${fullUri}`;
 }
 
 // Configuration modal logic (mounted to window)
@@ -1324,33 +1324,67 @@ window.confirmIndexTask = async function () {
 };
 
 // handleFileUpload restored (no longer needs sessionStems)
+// Cloud Run has 32MB request limit, so we upload files one by one
+const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB per file (leave buffer for headers)
+
 window.handleFileUpload = async function (input) {
     if (!input.files.length) return;
 
-    // No need to manually record filenames, Snapshot logic handles it automatically
+    const files = Array.from(input.files);
 
-    const formData = new FormData();
-    for (let i = 0; i < input.files.length; i++) {
-        formData.append('file', input.files[i]);
-    }
-
-    updateKBStatus(true, 'Uploading...');
-    try {
-        const res = await fetch('/api/kb/upload', { method: 'POST', body: formData });
-        if (res.ok) {
-            await refreshKBFiles();
-            updateKBStatus(false);
-        } else {
-            showModal("Upload failed", { title: "Error", type: "error" });
-            updateKBStatus(false);
-        }
-    } catch (e) {
-        console.error(e);
-        updateKBStatus(false);
-        showModal("Upload error: " + e.message, { title: "Error", type: "error" });
-    } finally {
+    // Check file sizes
+    const oversizedFiles = files.filter(f => f.size > MAX_FILE_SIZE);
+    if (oversizedFiles.length > 0) {
+        const names = oversizedFiles.map(f => `${f.name} (${(f.size/1024/1024).toFixed(1)}MB)`).join(', ');
+        showModal(`檔案過大，超過 30MB 限制：${names}\n\n建議：壓縮 PDF 或分割成多個檔案。`, {
+            title: "檔案過大",
+            type: "error"
+        });
         input.value = '';
+        return;
     }
+
+    updateKBStatus(true, `上傳中... (0/${files.length})`);
+
+    let successCount = 0;
+    let failedFiles = [];
+
+    // Upload files one by one to avoid request size limit
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        updateKBStatus(true, `上傳中... (${i+1}/${files.length}) ${file.name}`);
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const res = await fetch('/api/kb/upload', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (res.ok && !data.error) {
+                successCount++;
+            } else {
+                failedFiles.push({ name: file.name, error: data.error || res.statusText });
+            }
+        } catch (e) {
+            console.error('Upload error for', file.name, e);
+            failedFiles.push({ name: file.name, error: e.message });
+        }
+    }
+
+    await refreshKBFiles();
+    updateKBStatus(false);
+
+    if (failedFiles.length > 0) {
+        const failedMsg = failedFiles.map(f => `${f.name}: ${f.error}`).join('\n');
+        showModal(`上傳完成：${successCount} 成功，${failedFiles.length} 失敗\n\n失敗檔案：\n${failedMsg}`, {
+            title: "部分上傳失敗",
+            type: "warning"
+        });
+    } else if (successCount > 0) {
+        showModal(`成功上傳 ${successCount} 個檔案`, { title: "上傳成功", type: "success" });
+    }
+
+    input.value = '';
 };
 
 // Delete file (mounted to window)
@@ -1494,14 +1528,14 @@ function setBuildButtonState(state = "idle", label = "") {
 
     if (state === "success") {
         els.buildPipeline.disabled = false;
-        els.buildPipeline.innerHTML = `<span class="text-success me-1">✓</span>${label || "Build Success"}`;
+        els.buildPipeline.innerHTML = `<span class="text-success me-1">✓</span>${label || "建置成功"}`;
         setTimeout(reset, 1200);
         return;
     }
 
     if (state === "error") {
         els.buildPipeline.disabled = false;
-        els.buildPipeline.innerHTML = `<span class="text-danger me-1">⚠</span>${label || "Build Failed"}`;
+        els.buildPipeline.innerHTML = `<span class="text-danger me-1">⚠</span>${label || "建置失敗"}`;
         setTimeout(reset, 1800);
         return;
     }
@@ -2148,7 +2182,7 @@ async function suspendOtherEngines(targetPipeline = null) {
     }
 
     if (stopPromises.length) {
-        setChatStatus("Suspending...", "warn");
+        setChatStatus("暫停中...", "warn");
         await Promise.allSettled(stopPromises);
     }
     persistActiveEngines();
@@ -2178,20 +2212,20 @@ async function startEngine(pipelineName) {
 
         // If target Pipeline already has active engine, reuse it and sync UI
         if (state.chat.engineSessionId && existingSid === state.chat.engineSessionId) {
-            setChatStatus("Ready", "ready");
+            setChatStatus("就緒", "ready");
             updateDemoControls();
             return;
         }
         if (!state.chat.engineSessionId && existingSid) {
             state.chat.engineSessionId = existingSid;
-            setChatStatus("Ready", "ready");
+            setChatStatus("就緒", "ready");
             updateDemoControls();
             return;
         }
 
         state.chat.demoLoading = true;
-        updateDemoControls(); // Update UI to show "Loading..."
-        setChatStatus("Initializing...", "warn");
+        updateDemoControls(); // Update UI to show "載入中..."
+        setChatStatus("初始化中...", "warn");
 
         try {
             const newSid = uuidv4();
@@ -2205,15 +2239,15 @@ async function startEngine(pipelineName) {
             state.chat.activeEngines[pipelineName] = newSid;
             persistActiveEngines();
 
-            setChatStatus("Ready", "ready");
+            setChatStatus("就緒", "ready");
             log(`Engine started for ${pipelineName}`);
 
         } catch (err) {
             console.error(err);
-            setChatStatus("Engine Error", "error");
+            setChatStatus("引擎錯誤", "error");
             state.chat.engineSessionId = null;
             const msg = err?.message ? String(err.message) : "Unknown error";
-            showModal(`Engine initialization failed: ${msg}`, { title: "Engine Error", type: "error" });
+            showModal(`Engine initialization failed: ${msg}`, { title: "引擎錯誤", type: "error" });
         } finally {
             state.chat.demoLoading = false;
             updateDemoControls();
@@ -2256,7 +2290,7 @@ async function stopEngine(options = {}) {
     if (currentName) delete state.chat.activeEngines[currentName];
     persistActiveEngines();
 
-    setChatStatus("Offline", "info");
+    setChatStatus("離線", "info");
     updateDemoControls();
 }
 
@@ -2275,7 +2309,7 @@ async function ensureEngineReady(pipelineName, options = {}) {
     if (!forceRestart && state.chat.engineSessionId) {
         const ok = await verifyEngineSession(state.chat.engineSessionId);
         if (ok) {
-            setChatStatus("Ready", "ready");
+            setChatStatus("就緒", "ready");
             updateDemoControls();
             return true;
         }
@@ -2287,7 +2321,7 @@ async function ensureEngineReady(pipelineName, options = {}) {
         if (currentName) delete state.chat.activeEngines[currentName];
         state.chat.engineSessionId = null;
         persistActiveEngines();
-        setChatStatus("Reconnecting...", "warn");
+        setChatStatus("重新連線中...", "warn");
     }
 
     await startEngine(pipelineName);
@@ -2526,7 +2560,7 @@ async function switchChatPipeline(name) {
     if (state.parametersReady) {
         await startEngine(name);
     } else {
-        setChatStatus("Params Missing", "error");
+        setChatStatus("參數遺失", "error");
     }
 }
 
@@ -2555,9 +2589,9 @@ function resetChatSession() {
 
     // Update status display
     if (state.chat.engineSessionId) {
-        setChatStatus("Engine Ready", "ready");
+        setChatStatus("引擎就緒", "ready");
     } else {
-        setChatStatus("Engine Offline", "info");
+        setChatStatus("引擎離線", "info");
     }
 
     updateDemoControls();
@@ -2656,7 +2690,7 @@ function interruptAndLoadSession(sessionId) {
 
     renderChatHistory();
     renderChatSidebar();
-    setChatStatus("Ready", "ready");
+    setChatStatus("就緒", "ready");
 
     const sidebar = document.querySelector('.chat-sidebar');
     if (window.innerWidth < 768 && sidebar) {
@@ -2951,7 +2985,7 @@ function renderChatHistory() {
             <div class="empty-state-wrapper fade-in-up">
                 <div class="greeting-section">
                     <div class="greeting-text">
-                        <span class="greeting-gradient">What shall we explore today?</span>
+                        <span class="greeting-gradient">今天想探索什麼呢？</span>
                     </div>
                 </div>
             </div>
@@ -2994,6 +3028,22 @@ function renderChatHistory() {
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#039;');
             content.innerHTML = escapedText.replace(/\n/g, '<br>');
+
+            // Show attachments if any
+            if (entry.meta && entry.meta.attachments && entry.meta.attachments.length > 0) {
+                const attachDiv = document.createElement("div");
+                attachDiv.className = "user-attachments";
+                attachDiv.innerHTML = entry.meta.attachments.map(name => `
+                    <span class="user-attachment-chip">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                        </svg>
+                        ${name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}
+                    </span>
+                `).join('');
+                content.appendChild(attachDiv);
+            }
         }
         bubble.appendChild(content);
 
@@ -3055,9 +3105,9 @@ function setChatStatus(message, variant = "info") {
 
 function updateChatIdleStatus() {
     if (state.chat.engineSessionId) {
-        setChatStatus("Ready", "ready");
+        setChatStatus("就緒", "ready");
     } else {
-        setChatStatus("Engine Offline", "info");
+        setChatStatus("引擎離線", "info");
     }
 }
 
@@ -3071,7 +3121,7 @@ function setChatRunning(isRunning) {
     const iconWrapper = document.getElementById("chat-send-icon");
 
     if (isRunning) {
-        setChatStatus("Thinking...", "running");
+        setChatStatus("思考中...", "running");
 
         // Generating: input box locked, but button must be enabled (to click stop)
         if (els.chatInput) els.chatInput.disabled = true;
@@ -3734,7 +3784,16 @@ function updateProcessUI(entryIndex, eventData) {
                 spinner.remove(); // Remove element directly
             }
 
-            // 2. Show summary (output)
+            // 2. Add timing info to step title
+            if (eventData.duration_ms !== undefined) {
+                const titleSpan = currentStep.querySelector(".step-title span");
+                if (titleSpan) {
+                    const durationSec = (eventData.duration_ms / 1000).toFixed(2);
+                    titleSpan.textContent = `${eventData.name} (${durationSec}s)`;
+                }
+            }
+
+            // 3. Show summary (output)
             // If there was streaming content (step-content-stream) before, can choose to keep or be overwritten by summary
             // Here we choose to append summary as conclusion
             if (eventData.output) {
@@ -3745,10 +3804,18 @@ function updateProcessUI(entryIndex, eventData) {
                 // Smart scroll follow
                 smartScrollToBottom();
 
-                // (Optional) Hide streaming process, only show result? 
+                // (Optional) Hide streaming process, only show result?
                 // currentStep.querySelector(".step-content-stream").style.display = 'none';
             }
         }
+    } else if (eventData.type === "timing") {
+        // Add total timing summary at the end
+        const timingDiv = document.createElement("div");
+        timingDiv.className = "process-timing";
+        const totalSec = (eventData.total_ms / 1000).toFixed(2);
+        timingDiv.innerHTML = `<strong>Total: ${totalSec}s</strong>`;
+        body.appendChild(timingDiv);
+        smartScrollToBottom();
     }
 }
 
@@ -3759,7 +3826,7 @@ async function handleChatSubmit(event) {
     if (!canUseChat()) return;
     const engineReady = await ensureEngineReady(state.selectedPipeline);
     if (!engineReady) {
-        showModal("Please start the engine first.", { title: "Engine Required", type: "warning" });
+        showModal("請先啟動引擎。", { title: "需要引擎", type: "warning" });
         return;
     }
 
@@ -3788,7 +3855,13 @@ async function handleChatSubmit(event) {
     if (els.chatInput) {
         els.chatInput.style.height = 'auto';
     }
-    appendChatMessage("user", question);
+
+    // Get attached files BEFORE clearing them
+    const attachedFiles = getChatAttachedFilesContent();
+    const attachedFileNames = attachedFiles ? attachedFiles.map(f => f.name) : [];
+
+    // Append user message with attachment info
+    appendChatMessage("user", question, { attachments: attachedFileNames });
     setChatRunning(true);
     state.chat.controller = new AbortController();
 
@@ -3802,14 +3875,27 @@ async function handleChatSubmit(event) {
             dynamicParams["collection_name"] = selectedCollection;
         }
 
+        // Build the question with attached files context
+        let fullQuestion = question;
+        if (attachedFiles && attachedFiles.length > 0) {
+            const filesContext = attachedFiles.map(f =>
+                `[附件: ${f.name}]\n${f.content}`
+            ).join('\n\n---\n\n');
+            fullQuestion = `${question}\n\n--- 以下是使用者上傳的附件內容 ---\n\n${filesContext}`;
+        }
+
         const endpoint = `/api/pipelines/${encodeURIComponent(state.selectedPipeline)}/chat`;
         const body = JSON.stringify({
-            question,
+            question: fullQuestion,
             history: state.chat.history,
             is_demo: true,
             session_id: state.chat.engineSessionId,
-            dynamic_params: dynamicParams
+            dynamic_params: dynamicParams,
+            attached_files: attachedFiles ? attachedFiles.map(f => f.name) : []
         });
+
+        // Clear attached files after sending
+        clearChatAttachedFiles();
 
         const response = await fetch(endpoint, {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -3972,12 +4058,12 @@ async function handleChatSubmit(event) {
 
                             const procDiv = bubble.querySelector(".process-container");
                             if (procDiv) procDiv.classList.add("collapsed");
-                            setChatStatus("Ready", "ready");
+                            setChatStatus("就緒", "ready");
                         }
                         else if (data.type === "error") {
                             const msg = data?.message ? String(data.message) : "Unknown error";
                             showModal(`Backend Error: ${msg}`, { title: "Chat Error", type: "error" });
-                            setChatStatus("Error", "error");
+                            setChatStatus("錯誤", "error");
                         }
                     } catch (e) { console.error(e); }
                 }
@@ -4009,7 +4095,7 @@ async function handleChatSubmit(event) {
             delete state.chat._streamingEntryIndex;
 
             setChatRunning(false);
-            setChatStatus("Interrupted", "info");
+            setChatStatus("已中斷", "info");
             saveCurrentSession();
             if (chatContainer && handleScroll) {
                 chatContainer.removeEventListener('scroll', handleScroll);
@@ -4019,7 +4105,7 @@ async function handleChatSubmit(event) {
         console.error(err);
         const msg = err?.message ? String(err.message) : "Unknown error";
         showModal(`Network Error: ${msg}`, { title: "Chat Error", type: "error" });
-        setChatStatus("Error", "error");
+        setChatStatus("錯誤", "error");
     } finally {
         if (state.chat.controller) {
             state.chat.controller = null;
@@ -4041,7 +4127,7 @@ async function handleChatSubmit(event) {
 
 // --- Common Logic (Mode Switching, Node Picker, etc.) ---
 function resetLogView() { if (els.log) els.log.textContent = ""; }
-function setHeroPipelineLabel(name) { if (els.heroSelectedPipeline) els.heroSelectedPipeline.textContent = name ? name : "No Pipeline Selected"; }
+function setHeroPipelineLabel(name) { if (els.heroSelectedPipeline) els.heroSelectedPipeline.textContent = name ? name : "尚未選擇 Pipeline"; }
 function setHeroStatusLabel(status) {
     if (!els.heroStatus) return;
     els.heroStatus.dataset.status = status; els.heroStatus.textContent = status.toUpperCase();
@@ -5550,7 +5636,8 @@ function bindEvents() {
     }
 
     if (els.builderLogo) {
-        els.builderLogo.onclick = (e) => { e.preventDefault(); setMode(Modes.BUILDER); };
+        // Logo click: just prevent default, stay on current page
+        els.builderLogo.onclick = (e) => { e.preventDefault(); };
     }
 
     if (els.chatLogoBtn) {
@@ -6096,6 +6183,149 @@ window.toggleBackgroundMode = function () {
     }
 };
 
+// ========== Chat File Upload ==========
+// Store attached files with their parsed content
+const chatAttachedFiles = {
+    files: [], // { id, name, size, type, content, status }
+};
+
+window.handleChatFileSelect = async function(input) {
+    if (!input.files.length) return;
+
+    const files = Array.from(input.files);
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file for chat
+
+    for (const file of files) {
+        // Check file size
+        if (file.size > MAX_FILE_SIZE) {
+            showModal(`檔案 "${file.name}" 過大 (${(file.size/1024/1024).toFixed(1)}MB)。\n\n單個檔案限制 10MB。`, {
+                title: "檔案過大", type: "warning"
+            });
+            continue;
+        }
+
+        // Create file entry
+        const fileId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const fileEntry = {
+            id: fileId,
+            name: file.name,
+            size: file.size,
+            type: file.type || getFileTypeFromName(file.name),
+            content: null,
+            status: 'loading'
+        };
+
+        chatAttachedFiles.files.push(fileEntry);
+        updateAttachedFilesUI();
+
+        // Parse file content
+        try {
+            const content = await parseFileForChat(file);
+            fileEntry.content = content;
+            fileEntry.status = 'ready';
+        } catch (err) {
+            console.error('Failed to parse file:', err);
+            fileEntry.status = 'error';
+            fileEntry.error = err.message;
+        }
+
+        updateAttachedFilesUI();
+    }
+
+    // Clear input so same file can be selected again
+    input.value = '';
+};
+
+function getFileTypeFromName(filename) {
+    const ext = filename.split('.').pop().toLowerCase();
+    const typeMap = {
+        'pdf': 'application/pdf',
+        'doc': 'application/msword',
+        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'txt': 'text/plain',
+        'md': 'text/markdown'
+    };
+    return typeMap[ext] || 'text/plain';
+}
+
+async function parseFileForChat(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch('/api/chat/parse-file', {
+        method: 'POST',
+        body: formData
+    });
+
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: 'Parse failed' }));
+        throw new Error(err.error || 'Failed to parse file');
+    }
+
+    const data = await response.json();
+    return data.content;
+}
+
+function updateAttachedFilesUI() {
+    const container = document.getElementById('chat-attached-files');
+    const uploadBtn = document.getElementById('chat-file-upload');
+    const countBadge = document.getElementById('chat-file-count');
+
+    if (!container) return;
+
+    const files = chatAttachedFiles.files;
+
+    if (files.length === 0) {
+        container.style.display = 'none';
+        if (uploadBtn) uploadBtn.classList.remove('has-files');
+        if (countBadge) countBadge.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'flex';
+    if (uploadBtn) uploadBtn.classList.add('has-files');
+    if (countBadge) {
+        countBadge.textContent = files.length;
+        countBadge.style.display = 'inline';
+    }
+
+    container.innerHTML = files.map(f => `
+        <div class="chat-attached-file ${f.status}" data-file-id="${f.id}">
+            <svg class="file-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+            <span class="file-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+            <span class="file-remove" onclick="removeChatAttachedFile('${f.id}')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </span>
+        </div>
+    `).join('');
+}
+
+window.removeChatAttachedFile = function(fileId) {
+    chatAttachedFiles.files = chatAttachedFiles.files.filter(f => f.id !== fileId);
+    updateAttachedFilesUI();
+};
+
+function getChatAttachedFilesContent() {
+    const readyFiles = chatAttachedFiles.files.filter(f => f.status === 'ready' && f.content);
+    if (readyFiles.length === 0) return null;
+
+    return readyFiles.map(f => ({
+        name: f.name,
+        content: f.content
+    }));
+}
+
+function clearChatAttachedFiles() {
+    chatAttachedFiles.files = [];
+    updateAttachedFilesUI();
+}
+
 // Show notification toast
 function showNotification(type, title, message, onClick = null) {
     const container = document.getElementById('notification-container');
@@ -6163,7 +6393,7 @@ async function requestBrowserNotification(title, message) {
 // Toggle background tasks panel
 window.toggleBackgroundPanel = function () {
     if (state.mode !== Modes.CHAT) {
-        showNotification('info', 'Background Tasks', 'Please switch to Chat to view background tasks.');
+        showNotification('info', '背景任務', 'Please switch to Chat to view background tasks.');
         return;
     }
 
@@ -6213,7 +6443,7 @@ function checkForCompletedTasks(tasks) {
             backgroundTaskState.notifiedTasks.add(task.task_id);
             showNotification(
                 'success',
-                'Background Task Completed',
+                '背景任務已完成',
                 task.question,
                 () => showBackgroundTaskDetail(task.task_id)
             );
@@ -6221,7 +6451,7 @@ function checkForCompletedTasks(tasks) {
             backgroundTaskState.notifiedTasks.add(task.task_id);
             showNotification(
                 'error',
-                'Background Task Failed',
+                '背景任務失敗',
                 task.error || task.question,
                 () => showBackgroundTaskDetail(task.task_id)
             );
@@ -6235,7 +6465,7 @@ function renderBackgroundTasksList() {
     if (!container) return;
 
     if (backgroundTaskState.tasks.length === 0) {
-        container.innerHTML = '<div class="text-muted text-center py-4 small">No background tasks</div>';
+        container.innerHTML = '<div class="text-muted text-center py-4 small">無背景任務</div>';
         return;
     }
 
@@ -6245,7 +6475,7 @@ function renderBackgroundTasksList() {
             <div class="bg-task-item ${task.status}" onclick="showBackgroundTaskDetail('${task.task_id}')">
                 <div class="bg-task-header">
                     <div class="bg-task-question">${escapeHtml(task.question)}</div>
-                    <span class="bg-task-status ${task.status}">${task.status === 'running' ? 'Running' : task.status === 'completed' ? 'Completed' : 'Failed'}</span>
+                    <span class="bg-task-status ${task.status}">${task.status === 'running' ? '執行中' : task.status === 'completed' ? '已完成' : '失敗'}</span>
                 </div>
                 <div class="bg-task-meta">
                     <span>${task.pipeline_name}</span>
@@ -6294,12 +6524,12 @@ function updateBackgroundTasksCount() {
     }
 }
 
-function renderTaskDetailLoading(modal, message = 'Loading task details...') {
+function renderTaskDetailLoading(modal, message = '載入任務詳情...') {
     if (!modal) return;
     modal.innerHTML = `
         <div style="padding: 32px; text-align: center;">
             <div class="spinner-border" style="color: #3b82f6; width: 2.5rem; height: 2.5rem;" role="status">
-                <span class="visually-hidden">Loading...</span>
+                <span class="visually-hidden">載入中...</span>
             </div>
             <div style="margin-top: 16px; color: var(--text-secondary);">${escapeHtml(message)}</div>
         </div>
@@ -6316,7 +6546,7 @@ function setLoadButtonsLoading(taskId, isLoading, target) {
             btn.dataset.originalText = btn.dataset.originalText || btn.innerHTML;
             btn.disabled = true;
             btn.classList.add('disabled');
-            btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>${btn.dataset.loadTarget === 'new' ? 'Loading to new chat...' : 'Loading to chat...'}`;
+            btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>${btn.dataset.loadTarget === 'new' ? '載入至新對話...' : '載入至對話...'}`;
         } else {
             btn.disabled = false;
             btn.classList.remove('disabled');
@@ -6340,7 +6570,7 @@ window.showBackgroundTaskDetail = async function (taskId) {
         document.body.appendChild(modal);
     }
 
-    renderTaskDetailLoading(modal, 'Loading task details...');
+    renderTaskDetailLoading(modal, '載入任務詳情...');
     modal.showModal();
     backgroundTaskState.detailLoadingTaskId = taskId;
 
@@ -6357,22 +6587,22 @@ window.showBackgroundTaskDetail = async function (taskId) {
                 task = backgroundTaskState.tasks.find(t => t.task_id === taskId);
             }
             if (!task) {
-                showNotification('error', 'Error', 'Task not found');
+                showNotification('error', '錯誤', '找不到任務');
                 if (modal) modal.close();
                 backgroundTaskState.detailLoadingTaskId = null;
                 return;
             }
         }
 
-        const statusText = task.status === 'running' ? 'Running' : task.status === 'completed' ? 'Completed' : 'Failed';
+        const statusText = task.status === 'running' ? '執行中' : task.status === 'completed' ? '已完成' : '失敗';
 
         const actionButtons = `
             ${task.status === 'completed' ? `
-                <button class="btn btn-primary" onclick="copyTaskResult('${taskId}')">Copy Result</button>
-                <button class="btn btn-outline-secondary" data-task-id="${taskId}" data-load-target="current" onclick="loadTaskToChat('${taskId}','current')">Load to Current Chat</button>
-                <button class="btn btn-outline-secondary" data-task-id="${taskId}" data-load-target="new" onclick="loadTaskToChat('${taskId}','new')">Load to New Chat</button>
+                <button class="btn btn-primary" onclick="copyTaskResult('${taskId}')">複製結果</button>
+                <button class="btn btn-outline-secondary" data-task-id="${taskId}" data-load-target="current" onclick="loadTaskToChat('${taskId}','current')">載入至當前對話</button>
+                <button class="btn btn-outline-secondary" data-task-id="${taskId}" data-load-target="new" onclick="loadTaskToChat('${taskId}','new')">載入至新對話</button>
             ` : ''}
-            <button class="btn btn-outline-danger ms-auto" onclick="deleteBackgroundTask('${taskId}')">Delete</button>
+            <button class="btn btn-outline-danger ms-auto" onclick="deleteBackgroundTask('${taskId}')">刪除</button>
         `;
 
         modal.innerHTML = `
@@ -6387,7 +6617,7 @@ window.showBackgroundTaskDetail = async function (taskId) {
             </div>
             <div class="bg-task-detail-body">
                 <div class="bg-task-detail-question">
-                    <strong>Question</strong>
+                    <strong>問題</strong>
                     ${escapeHtml(task.full_question || task.question)}
                 </div>
                 ${task.status === 'completed' ? `
@@ -6396,15 +6626,15 @@ window.showBackgroundTaskDetail = async function (taskId) {
                     </div>
                 ` : task.status === 'failed' ? `
                     <div class="bg-task-detail-question" style="background: rgba(239, 68, 68, 0.06); border: 1px solid rgba(239, 68, 68, 0.15);">
-                        <strong style="color: #ef4444;">Error</strong>
-                        ${escapeHtml(task.error || 'Unknown error')}
+                        <strong style="color: #ef4444;">錯誤</strong>
+                        ${escapeHtml(task.error || '未知錯誤')}
                     </div>
                 ` : `
                     <div style="text-align: center; padding: 40px 20px;">
                         <div class="spinner-border" style="color: #3b82f6; width: 2rem; height: 2rem;" role="status">
-                            <span class="visually-hidden">Loading...</span>
+                            <span class="visually-hidden">載入中...</span>
                         </div>
-                        <div style="margin-top: 16px; color: var(--text-secondary); font-size: 0.9rem;">Processing your request...</div>
+                        <div style="margin-top: 16px; color: var(--text-secondary); font-size: 0.9rem;">處理中...</div>
                     </div>
                 `}
             </div>
@@ -6430,7 +6660,7 @@ window.showBackgroundTaskDetail = async function (taskId) {
         }
     } catch (e) {
         console.error('Failed to load task detail:', e);
-        renderTaskDetailLoading(modal, 'Failed to load task details.');
+        renderTaskDetailLoading(modal, '載入任務詳情失敗。');
     } finally {
         backgroundTaskState.detailLoadingTaskId = null;
     }
@@ -6581,11 +6811,11 @@ window.deleteBackgroundTask = async function (taskId) {
 // Clear completed tasks
 window.clearCompletedTasks = async function () {
     try {
-        const confirmed = await showConfirm("This will remove all completed background tasks. Continue?", {
-            title: "Clear Completed Tasks",
+        const confirmed = await showConfirm("這將刪除所有已完成的背景任務。確定繼續？", {
+            title: "清除已完成任務",
             type: "warning",
-            confirmText: "Clear",
-            cancelText: "Cancel",
+            confirmText: "清除",
+            cancelText: "取消",
             danger: true
         });
         if (!confirmed) return;
@@ -6610,7 +6840,7 @@ window.clearCompletedTasks = async function () {
         localStorage.setItem(BG_TASKS_STORAGE_KEY, JSON.stringify(backgroundTaskState.cachedTasks));
 
         const totalCleared = Math.max(serverCount, cachedCount);
-        showNotification('success', 'Cleared', `Cleared ${totalCleared} completed tasks`);
+        showNotification('success', '已清除', `已清除 ${totalCleared} 個已完成任務`);
 
         // Update UI
         renderBackgroundTasksList();
@@ -6623,7 +6853,7 @@ window.clearCompletedTasks = async function () {
 // Send to background
 async function sendToBackground(question) {
     if (!state.chat.engineSessionId) {
-        showModal("Please start the engine first", { title: "Engine Required", type: "warning" });
+        showModal("請先啟動引擎", { title: "需要引擎", type: "warning" });
         return null;
     }
 

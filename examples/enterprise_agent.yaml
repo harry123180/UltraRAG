@@ -1,0 +1,47 @@
+# Enterprise Agent POC Pipeline
+# 企業內部智能問答系統（含路由判斷）
+
+# MCP Servers
+servers:
+  benchmark: servers/benchmark
+  gemini: servers/gemini
+  retriever: servers/retriever
+  websearch: servers/websearch
+  agent_router: servers/agent_router
+  prompt: servers/prompt
+  custom: servers/custom
+
+# MCP Client Pipeline
+pipeline:
+# 1. 載入使用者問題
+- benchmark.get_data
+
+# 2. 初始化各模組
+- gemini.gemini_init
+- retriever.retriever_init
+- websearch.websearch_init
+- agent_router.router_init
+
+# 3. 先進行內部文件檢索
+- retriever.retriever_search
+
+# 4. 路由判斷並分支處理
+- branch:
+    router:
+    - agent_router.classify_query
+    branches:
+      # 簡單問候 - 直接回答
+      greeting:
+      - custom.greeting_prompt
+      - gemini.generate
+
+      # 內部文件問答
+      internal:
+      - prompt.enterprise_rag_prompt
+      - gemini.generate
+
+      # 外部搜尋
+      external:
+      - websearch.search
+      - prompt.enterprise_web_search_prompt
+      - gemini.generate

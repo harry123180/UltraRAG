@@ -1,0 +1,113 @@
+benchmark:
+  tools:
+    get_data:
+      input:
+        benchmark: $benchmark
+      output:
+      - q_ls
+      - gt_ls
+  parameter: servers/benchmark/parameter.yaml
+  path: servers/benchmark/src/benchmark.py
+gemini:
+  tools:
+    gemini_init:
+      input:
+        api_key: $api_key
+        model_name: $model_name
+        generation_config: $generation_config
+    generate:
+      input:
+        prompt_ls: prompt_ls
+        system_prompt: $system_prompt
+      output:
+      - ans_ls
+  parameter: servers/gemini/parameter.yaml
+  path: servers/gemini/src/gemini.py
+retriever:
+  tools:
+    retriever_init:
+      input:
+        model_name_or_path: $model_name_or_path
+        backend_configs: $backend_configs
+        batch_size: $batch_size
+        corpus_path: $corpus_path
+        gpu_ids: $gpu_ids
+        is_multimodal: $is_multimodal
+        backend: $backend
+        index_backend: $index_backend
+        index_backend_configs: $index_backend_configs
+        is_demo: $is_demo
+        collection_name: $collection_name
+    retriever_search:
+      input:
+        query_list: q_ls
+        top_k: $top_k
+        query_instruction: $query_instruction
+        collection_name: $collection_name
+      output:
+      - ret_psg
+  parameter: servers/retriever/parameter.yaml
+  path: servers/retriever/src/retriever.py
+prompt:
+  prompts:
+    enterprise_rag_prompt:
+      input:
+        q_ls: q_ls
+        ret_psg: ret_psg
+        template: $enterprise_rag_template
+      output:
+      - prompt_ls
+    enterprise_web_search_prompt:
+      input:
+        q_ls: q_ls
+        web_results: web_results
+        template: $enterprise_web_search_template
+      output:
+      - prompt_ls
+  parameter: servers/prompt/parameter.yaml
+  path: servers/prompt/src/prompt.py
+websearch:
+  tools:
+    websearch_init:
+      input:
+        api_key: $api_key
+        search_depth: $search_depth
+        max_results: $max_results
+    search:
+      input:
+        q_ls: q_ls
+        search_depth: $search_depth
+        max_results: $max_results
+      output:
+      - web_results
+  parameter: servers/websearch/parameter.yaml
+  path: servers/websearch/src/websearch.py
+agent_router:
+  tools:
+    router_init:
+      input:
+        internal_keywords: $internal_keywords
+        external_indicators: $external_indicators
+        confidence_threshold: $confidence_threshold
+    classify_query:
+      input:
+        q_ls: q_ls
+        ret_psg: ret_psg
+      output:
+      - route
+  parameter: servers/agent_router/parameter.yaml
+  path: servers/agent_router/src/agent_router.py
+custom:
+  tools:
+    get_route:
+      input:
+        route: route
+      output:
+      - route
+    greeting_prompt:
+      input:
+        q_ls: q_ls
+      output:
+      - prompt_ls
+  parameter: servers/custom/parameter.yaml
+  path: servers/custom/src/custom.py

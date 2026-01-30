@@ -883,6 +883,16 @@ def chat_demo_stream(
     """Generator function for SSE streaming"""
     session = SESSION_MANAGER.get(session_id)
     if not session:
+        # Auto-create session if not exists (handles Cloud Run cold start / multi-instance)
+        LOGGER.info(f"Session {session_id} not found, auto-creating for pipeline {name}")
+        try:
+            start_demo_session(name, session_id)
+            session = SESSION_MANAGER.get(session_id)
+        except Exception as e:
+            LOGGER.error(f"Failed to auto-create session: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Session creation failed: {e}'})}\n\n"
+            return
+    if not session:
         yield f"data: {json.dumps({'type': 'error', 'message': 'Session expired'})}\n\n"
         return
 
@@ -991,6 +1001,7 @@ def chat_multiturn_stream(
     question: str,
     dynamic_params: Optional[Dict[str, Any]] = None,
     conversation_history: Optional[List[Dict[str, str]]] = None,
+    pipeline_name: Optional[str] = None,
 ):
     """Multi-turn conversation streaming - directly uses LocalGenerationService for generation.
 
@@ -1001,21 +1012,26 @@ def chat_multiturn_stream(
         question: Current user question
         dynamic_params: Dynamic parameters
         conversation_history: Frontend-provided conversation history (preferred)
+        pipeline_name: Pipeline name (used when session doesn't exist)
 
     Yields:
         Server-sent events stream
     """
     session = SESSION_MANAGER.get(session_id)
-    if not session:
-        yield f"data: {json.dumps({'type': 'error', 'message': 'Session expired'})}\n\n"
+
+    # Cloud Run stateless: session may not exist, but we can still proceed if we have history
+    if not session and not conversation_history:
+        yield f"data: {json.dumps({'type': 'error', 'message': 'Session expired and no conversation history provided'})}\n\n"
         return
 
     # Use frontend-provided conversation history (frontend is "single source of truth")
     # If frontend didn't provide, use backend-maintained history (compatible with old logic)
     if conversation_history is not None:
         history = list(conversation_history)  # Copy to avoid modifying original list
-    else:
+    elif session:
         history = session.get_conversation_history()
+    else:
+        history = []
 
     # Add current question
     history.append({"role": "user", "content": question})
@@ -1033,26 +1049,40 @@ def chat_multiturn_stream(
         try:
             # Get generation configuration
             # First try to get from current pipeline parameters
-            pipeline_name = session._pipeline_name
-            if pipeline_name:
+            # Use session's pipeline_name if available, otherwise use passed-in pipeline_name
+            effective_pipeline_name = (session._pipeline_name if session else None) or pipeline_name
+            if effective_pipeline_name:
                 try:
-                    params = load_parameters(pipeline_name)
+                    params = load_parameters(effective_pipeline_name)
                     gen_params = params.get("generation", {})
+                    # Also check for gemini params
+                    gemini_params = params.get("gemini", {})
                 except Exception:
                     gen_params = {}
+                    gemini_params = {}
             else:
                 gen_params = {}
+                gemini_params = {}
 
-            # If dynamic_params has generation config, override
-            if dynamic_params and "generation" in dynamic_params:
-                gen_params.update(dynamic_params["generation"])
+            # If dynamic_params has generation/gemini config, override
+            if dynamic_params:
+                if "generation" in dynamic_params:
+                    gen_params.update(dynamic_params["generation"])
+                if "gemini" in dynamic_params:
+                    gemini_params.update(dynamic_params["gemini"])
 
-            # Get system_prompt
-            system_prompt = gen_params.get("system_prompt", "")
+            # Determine backend: use gemini if GOOGLE_API_KEY set or gemini params exist
+            import os
+            use_gemini = bool(os.environ.get("GOOGLE_API_KEY")) or bool(gemini_params)
+
+            # Get system_prompt from appropriate source
+            if use_gemini:
+                system_prompt = gemini_params.get("system_prompt", gen_params.get("system_prompt", ""))
+            else:
+                system_prompt = gen_params.get("system_prompt", "")
 
             # Import LocalGenerationService
             import sys
-            import os
 
             sys.path.append(os.getcwd())
             try:
@@ -1066,13 +1096,30 @@ def chat_multiturn_stream(
                 token_queue.put(None)
                 return
 
-            # Create service instance
+            # Create service instance with appropriate backend
             try:
+                if use_gemini:
+                    # Build gemini backend config
+                    backend_configs = {
+                        "gemini": {
+                            "api_key": gemini_params.get("api_key") or os.environ.get("GOOGLE_API_KEY"),
+                            "model_name": gemini_params.get("model_name", "gemini-3-pro-preview"),
+                            "generation_config": gemini_params.get("generation_config", {}),
+                        }
+                    }
+                    sampling_params = gemini_params.get("generation_config", {})
+                    backend = "gemini"
+                    LOGGER.info(f"Using Gemini backend for multiturn chat: {backend_configs['gemini']['model_name']}")
+                else:
+                    backend_configs = gen_params.get("backend_configs", {})
+                    sampling_params = gen_params.get("sampling_params", {})
+                    backend = "openai"
+
                 service = LocalGenerationService(
-                    backend_configs=gen_params.get("backend_configs", {}),
-                    sampling_params=gen_params.get("sampling_params", {}),
+                    backend_configs=backend_configs,
+                    sampling_params=sampling_params,
                     extra_params=gen_params.get("extra_params", {}),
-                    backend="openai",
+                    backend=backend,
                 )
             except Exception as e:
                 token_queue.put(
@@ -1977,10 +2024,14 @@ def clear_completed_background_tasks(user_id: str = "") -> int:
 
 # Knowledge Base Management
 def load_kb_config() -> Dict[str, Any]:
+    # Support environment variables for cloud deployment
+    milvus_uri = os.environ.get("MILVUS_URI", "tcp://127.0.0.1:19530")
+    milvus_token = os.environ.get("MILVUS_TOKEN", "")
+
     default_config = {
         "milvus": {
-            "uri": "tcp://127.0.0.1:19530",
-            "token": "",
+            "uri": milvus_uri,
+            "token": milvus_token,
             "id_field_name": "id",
             "vector_field_name": "vector",
             "text_field_name": "contents",
@@ -2642,8 +2693,10 @@ def run_kb_pipeline_tool(
             "index_backend_configs": {"milvus": milvus_config_dict},
         }
 
-        # If user configured Embedding parameters, use OpenAI backend
+        # Check for embedding configuration
+        # Priority: 1) User-provided API key, 2) GOOGLE_API_KEY env var for Gemini
         if embedding_params and embedding_params.get("api_key"):
+            # User provided explicit embedding API key - use OpenAI backend
             retriever_override["backend"] = "openai"
             retriever_override["backend_configs"] = {
                 "openai": {
@@ -2654,6 +2707,15 @@ def run_kb_pipeline_tool(
                     "model_name": embedding_params.get(
                         "model_name", "text-embedding-3-small"
                     ),
+                }
+            }
+        elif os.environ.get("GOOGLE_API_KEY"):
+            # Cloud deployment: use Gemini embedding with GOOGLE_API_KEY
+            retriever_override["backend"] = "gemini"
+            retriever_override["backend_configs"] = {
+                "gemini": {
+                    "api_key": os.environ.get("GOOGLE_API_KEY"),
+                    "model_name": "gemini-embedding-001",
                 }
             }
 
